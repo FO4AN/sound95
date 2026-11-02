@@ -52,6 +52,11 @@ function artistOf(t) { return (t.artist || t.artist_names || 'Unknown Artist'); 
 
 async function getClientId() {
   if (clientId) return clientId;
+  if (window.__TAURI_INTERNALS__ && window.__TAURI_INTERNALS__.invoke) {
+    clientId = await window.__TAURI_INTERNALS__.invoke('sc_client_id', {});
+    setStatusRight('SC client_id loaded (rust)');
+    return clientId;
+  }
   const html = await (await fetch('https://soundcloud.com')).text();
   const re = /"hydratable"\s*:\s*"apiClient"\s*,\s*"data"\s*:\s*\{\s*"id"\s*:\s*"([^"]+)"/;
   const m = html.match(re);
@@ -70,6 +75,22 @@ async function scApi(path) {
 
 async function searchTracks(q) {
   setStatus('Searching for "' + q + '"...');
+  if (window.__TAURI_INTERNALS__ && window.__TAURI_INTERNALS__.invoke) {
+    const tracks = await window.__TAURI_INTERNALS__.invoke('sc_search', { q: q, limit: 30 });
+    const results = (tracks || []).filter(function (r) { return r && r.id; });
+    return results.map(function (r) {
+      return {
+        id: r.id,
+        urn: r.urn,
+        title: r.title || 'Untitled',
+        artist: r.artist || r.artist_names || 'Unknown Artist',
+        duration: r.duration || 0,
+        artwork: r.artwork || '',
+        transcodings: r.transcodings || [],
+        track_authorization: r.track_authorization || null
+      };
+    });
+  }
   const data = await scApi('/search/tracks?q=' + encodeURIComponent(q) + '&limit=30&offset=0');
   const results = (data.results || []).filter(function (r) { return r.kind === 'track'; });
   const tracks = results.map(function (r) {
@@ -126,6 +147,19 @@ async function playTrack(track, index) {
   currentTrack = track;
   setStatus('Loading "' + track.title + '"...');
   try {
+    if (window.__TAURI_INTERNALS__ && window.__TAURI_INTERNALS__.invoke) {
+      try {
+        const res = await window.__TAURI_INTERNALS__.invoke('sc_play_track', { trackId: track.id });
+        if (res && res.stream_url) {
+          currentTrack = Object.assign({}, track, res);
+          audio.src = res.stream_url;
+          audio.volume = parseFloat(volEl.value) || 1;
+          await audio.play();
+          setStatus('Playing: ' + currentTrack.title);
+          return;
+        }
+      } catch (e) { /* fall through to local resolve flow */ }
+    }
     let trans = track.transcodings;
     let auth = track.track_authorization;
     if ((!trans || !trans.length) && track.id) {
