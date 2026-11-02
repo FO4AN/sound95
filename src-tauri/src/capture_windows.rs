@@ -66,19 +66,20 @@ fn listen(
     let event = client.set_get_eventhandle()?;
     let packets = client.get_audiocaptureclient()?;
     client.start_stream()?;
-    live.store(true, Ordering::Relaxed);
 
     let mut bytes = VecDeque::new();
     while !stop.load(Ordering::Relaxed) {
         if event.wait_for_event(QUIET_MS).is_err() {
+            live.store(false, Ordering::Relaxed);
             ring.lock().expect("ring").clear();
             continue;
         }
+        live.store(true, Ordering::Relaxed);
         packets.read_from_device_to_deque(&mut bytes)?;
         let whole = bytes.len() - bytes.len() % FRAME_BYTES;
         let frames: Vec<u8> = bytes.drain(..whole).collect();
         let mut samples = ring.lock().expect("ring");
-        for frame in frames.chunks_exact(FRAME_BYTES) {
+        for frame in frames.as_chunks::<FRAME_BYTES>().0 {
             if samples.len() == FFT {
                 samples.pop_front();
             }
