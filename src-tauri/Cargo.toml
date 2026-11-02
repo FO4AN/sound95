@@ -1,0 +1,22 @@
+[package]
+name = "soundscape"
+version = "0.1.0"
+description = "SoundScape — Windows 95 style SoundCloud player"
+authors = ["Flint"]
+edition = "2021"
+
+[lib]
+name = "soundscape_lib"
+path = "src/lib.rs"
+
+[features]
+default = ["custom-protocol"]
+custom-protocol = ["tauri/custom-protocol"]
+
+[dependencies]
+tauri = "2"
+tauri-plugin-updater = "2"
+
+[package.metadata.tauri]
+productName = "SoundScape"
+identifier = "com.soundscape.app"

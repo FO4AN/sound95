@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SoundScape</title>
+<link rel="stylesheet" href="win95.css">
+</head>
+<body>
+  <div id="desktop">
+    <div id="window">
+      <div id="titlebar">
+        <span id="title">SoundScape</span>
+        <span id="tb-buttons">
+          <button id="tb-min" title="Minimize">&#8211;</button>
+          <button id="tb-max" title="Maximize">&#9633;</button>
+          <button id="tb-close" title="Close">&#10005;</button>
+        </span>
+      </div>
+      <div id="menubar">
+        <span class="mi">File</span><span class="mi">Edit</span><span class="mi">View</span><span class="mi">Help</span>
+      </div>
+      <div id="toolbar">
+        <button id="btn-back" title="Back">&#9664; &#9654;</button>
+        <button id="btn-fwd" title="Forward">&#9654; &#9664;</button>
+        <button id="btn-refresh" title="Refresh">&#10227;</button>
+        <input id="search" type="text" placeholder="Search SoundCloud..." spellcheck="false">
+        <button id="btn-search">&#128269; Search</button>
+        <button id="btn-play" title="Play">&#9654; Play</button>
+        <button id="btn-stop" title="Stop">&#9632; Stop</button>
+      </div>
+      <div id="main">
+        <div id="tracklist">
+          <div id="tracklist-empty">No tracks loaded. Search for something!</div>
+        </div>
+        <div id="nowplaying">
+          <div id="artwrap"><img id="artwork" src="" alt="artwork"></div>
+          <div id="np-title">Nothing playing</div>
+          <div id="np-artist">—</div>
+          <div id="np-controls">
+            <button id="np-playpause">&#9654;</button>
+            <button id="np-stop">&#9632;</button>
+            <button id="np-prev">&#171; Prev</button>
+            <button id="np-next">&#Next; Next</button>
+            <input id="volume" type="range" min="0" max="1" step="0.01" value="1">
+          </div>
+          <div id="progressrow">
+            <div id="progress"><div id="progress-fill"></div></div>
+            <span id="time-cur">0:00</span>
+            <span id="time-total">-0:00</span>
+            <input id="seek" type="range" min="0" max="0" step="0.1" value="0">
+          </div>
+        </div>
+      </div>
+      <div id="statusbar">
+        <span id="status-msg">Ready.</span>
+        <span id="status-right">SoundScape v0.1</span>
+      </div>
+    </div>
+  </div>
+  <div id="taskbar">
+    <button id="start">&#9600; Start</button>
+    <button id="task-app">&#9835; SoundScape</button>
+  </div>
+  <audio id="audio" preload="none"></audio>
+  <script src="app.js"></script>
+</body>
+</html>

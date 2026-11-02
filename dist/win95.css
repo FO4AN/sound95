@@ -1,0 +1,185 @@
+/* SoundScape — Windows 95 theme */
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  overflow: hidden;
+  background: #008080;
+  font-family: "MS Sans Serif", "Pixelated MS Sans Serif", "Tahoma", Geneva, sans-serif;
+  font-size: 11px;
+  color: #000;
+}
+
+button {
+  font-family: inherit;
+  font-size: 11px;
+  background: #c0c0c0;
+  border: 2px outset #ffffff;
+  padding: 2px 10px;
+  cursor: default;
+  min-width: 40px;
+}
+button:active, button.bevel-inset {
+  border-style: inset;
+}
+
+input[type="text"], input[type="range"] {
+  font-family: inherit;
+  font-size: 11px;
+  background: #ffffff;
+  border: 2px inset #7b7b7b;
+  padding: 2px 4px;
+}
+
+#desktop { position: fixed; inset: 0; }
+
+#window {
+  position: absolute;
+  left: 50%;
+  top: 46px;
+  transform: translateX(-50%);
+  width: 840px;
+  height: 585px;
+  max-width: calc(100vw - 24px);
+  max-height: calc(100vh - 90px);
+  background: #c0c0c0;
+  border: 3px ridge #ffffff #7b7b7b #7b7b7b #ffffff;
+  box-shadow: 3px 3px 0 rgba(0, 0, 0, 0.45);
+  display: flex;
+  flex-direction: column;
+}
+
+#titlebar {
+  height: 20px;
+  flex: 0 0 auto;
+  background: linear-gradient(90deg, #000080, #1084d0);
+  color: #ffffff;
+  font-weight: bold;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 2px 0 4px;
+  user-select: none;
+  text-shadow: 1px 1px 0 #000080;
+}
+#title { padding-left: 4px; }
+#tb-buttons { display: flex; gap: 2px; }
+#tb-buttons button {
+  width: 18px; height: 14px;
+  min-width: 18px; padding: 0;
+  background: #c0c0c0;
+  border: 2px outset #ffffff;
+  font-size: 10px; line-height: 1;
+  display: flex; align-items: center; justify-content: center;
+}
+#tb-buttons button:active { border-style: inset; }
+
+#menubar {
+  flex: 0 0 auto;
+  display: flex;
+  gap: 2px;
+  padding: 2px 4px;
+  background: #c0c0c0;
+  border-bottom: 2px ridge #ffffff;
+}
+.mi { padding: 2px 8px; }
+.mi:hover { background: #000080; color: #fff; }
+
+#toolbar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 6px;
+  background: #c0c0c0;
+  border-bottom: 2px ridge #ffffff;
+}
+#search { width: 200px; }
+#toolbar .spacer { flex: 1; }
+
+#main { flex: 1 1 auto; display: flex; min-height: 0; }
+
+#tracklist {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  background: #ffffff;
+  border: 2px inset #7b7b7b;
+  margin: 4px;
+  padding: 2px;
+}
+#tracklist-empty { padding: 8px; color: #808080; }
+
+.track-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 4px;
+}
+.track-row.playing { background: #000080; color: #ffffff; }
+.track-row .t-title { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.track-row .t-artist { flex: 0 0 auto; color: #808080; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.track-row.playing .t-artist { color: #c0c0c0; }
+
+#nowplaying {
+  flex: 0 0 235px;
+  border-left: 2px inset #7b7b7b;
+  background: #c0c0c0;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  overflow-y: auto;
+}
+#artwrap { width: 150px; height: 150px; border: 2px inset #7b7b7b; background: #fff; display: flex; align-items: center; justify-content: center; overflow: hidden; }
+#artwork { width: 144px; height: 144px; object-fit: cover; display: block; background: #c0c0c0; }
+#np-title { font-weight: bold; text-align: center; word-break: break-word; }
+#np-artist { color: #404040; text-align: center; word-break: break-word; }
+#np-controls { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; justify-content: center; }
+#np-controls #np-playpause { min-width: 30px; }
+#volume { width: 90px; }
+
+#progressrow { display: flex; align-items: center; gap: 6px; width: 100%; }
+#progress { flex: 1 1 auto; height: 14px; border: 2px inset #7b7b7b; background: #c0c0c0; position: relative; }
+#progress-fill { position: absolute; inset: 0 auto 0 0; background: #000080; }
+#progressrow input { flex: 0 0 90px; }
+#time-cur, #time-total { min-width: 34px; text-align: center; font-variant-numeric: tabular-nums; }
+#progressrow input#seek { width: 90px; }
+
+#statusbar {
+  flex: 0 0 auto;
+  border-top: 2px ridge #ffffff;
+  padding: 2px 4px;
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+/* Taskbar */
+#taskbar {
+  position: fixed;
+  left: 0; right: 0; bottom: 0;
+  height: 40px;
+  background: #c0c0c0;
+  border-top: 2px ridge #ffffff;
+  display: flex;
+  align-items: center;
+  padding-left: 4px;
+  gap: 6px;
+  z-index: 10;
+}
+#start {
+  width: 150px; height: 28px;
+  font-weight: bold; font-size: 12px;
+  background: linear-gradient(90deg, #000080, #1084d0);
+  color: #fff;
+  border: 2px outset #ffffff;
+  text-shadow: 1px 1px 0 #000;
+}
+#task-app {
+  margin-left: 6px;
+  font-weight: bold;
+}
+#task-app.bevel-inset { border-style: inset; }
