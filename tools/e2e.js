@@ -283,6 +283,18 @@
     await search('nothing');
     await check(() => byText('.empty', 'No tracks found'), 'empty search state');
 
+    // The mock always offers 9.9.9, with a signature that can't pass.
+    await check(() => byText('.balloon p', 'Sound95 9.9.9'), 'a newer release shows a notice', 15000);
+    await clickText('.balloon button', 'Details');
+    await check(() => byText('.update-notes', 'Fixes everything'), 'the update shows what changed');
+    await clickText('.dialog button', 'Later');
+    await check(() => !$('.balloon') && !$('.dialog'), 'an update can wait');
+    byText('.menu-title', 'Help').dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+    await clickText('.menu-item', 'Check for Updates');
+    await clickText('.dialog button', 'Update Now');
+    await check(() => byText('.dialog p', 'The update could not'), 'a badly signed update is refused', 15000);
+    await clickText('.dialog button', 'OK');
+
     // Sessions last about a day, so an expired one must renew without a prompt,
     // even when several requests hit it at once.
     await invoke('api_get', { target: '/__expire' });

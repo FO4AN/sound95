@@ -94,6 +94,14 @@ fn detect(installed: impl Fn(&str) -> bool) -> Option<Installer> {
 }
 
 pub fn status() -> AudioStatus {
+    // Windows plays through WebView2, and an AppImage carries its own plug-ins.
+    if cfg!(windows) || std::env::var_os("APPIMAGE").is_some() {
+        return AudioStatus {
+            ready: true,
+            can_install: false,
+            command: None,
+        };
+    }
     let installer = detect(on_path);
     AudioStatus {
         ready: ready(),

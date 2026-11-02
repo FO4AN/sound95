@@ -167,6 +167,14 @@ const server = createServer(async (req, res) => {
   log.push({ method: req.method, path, auth: (req.headers.authorization || '').split(' ')[0], body: raw.slice(0, 300) });
 
   if (path === '/__log') return json(res, 200, log);
+  if (path === '/update.json') {
+    const release = { url: `${ORIGIN}/update.bin`, signature: 'bm90IGEgcmVhbCBzaWduYXR1cmU=' };
+    return json(res, 200, {
+      version: '9.9.9', notes: 'Fixes everything.', pub_date: '2026-01-01T00:00:00Z',
+      platforms: { 'linux-x86_64': release, 'windows-x86_64': release },
+    });
+  }
+  if (path === '/update.bin') { res.writeHead(200, { 'content-length': 4 }); return res.end('fake'); }
   if (path === '/__report') { console.log('E2E', url.searchParams.get('m')); return json(res, 200, {}); }
   if (path === '/__expire') { access.clear(); return json(res, 200, { ok: true }); }
   if (path === '/__revoke') { access.clear(); refresh.clear(); return json(res, 200, { ok: true }); }

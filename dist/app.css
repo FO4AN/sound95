@@ -257,3 +257,74 @@ kbd { font: inherit; }
   .list-head .plays, .row .plays { display: none; }
   .mini-viz { display: none; }
 }
+
+/* Small windows. A tiling compositor hands out whatever tile is free and scales a
+   window that asks for more, which puts the pointer out of line with the page, so
+   the layout fits any size instead of insisting on a minimum. */
+@media (max-width: 980px) {
+  .workspace { grid-template-columns: 160px minmax(0, 1fr) 190px; }
+  .workspace.no-queue { grid-template-columns: 160px minmax(0, 1fr); }
+  .playerbar { grid-template-columns: minmax(0, 1fr) minmax(190px, 1.4fr) auto; gap: 6px; }
+  .mini-viz { display: none; }
+  .np-right { gap: 3px; }
+  .np-right input { width: 60px; }
+}
+@media (max-width: 760px) {
+  .workspace { grid-template-columns: 34px minmax(0, 1fr) 170px; }
+  .workspace.no-queue { grid-template-columns: 34px minmax(0, 1fr); }
+  .sidebar { padding: 2px; }
+  .tree-head, .tree-empty { display: none; }
+  .tree-item { justify-content: center; height: 26px; margin: 0; padding: 0; border-left: 0; }
+  .tree-item > span { display: none; }
+  .tree-item.selected { background: var(--select); }
+  .np { grid-template-columns: 48px minmax(0, 1fr); }
+  #np-like, #status-source, .vol-icon, .np-right input { display: none; }
+  .account { max-width: 110px; }
+}
+@media (max-width: 560px) {
+  .workspace { grid-template-columns: 34px minmax(0, 1fr); }
+  .workspace:not(.no-queue) .content { display: none; }
+  .address > span, .tool-sep { display: none; }
+  .account { width: 30px; padding: 0 5px; }
+  .account span { display: none; }
+  .playerbar { grid-template-columns: 48px minmax(0, 1fr) auto; }
+  .np { grid-template-columns: 48px; }
+  .np-text, .seek-row .time { display: none; }
+  .seek-row { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 400px) {
+  #viz-toggle, #karaoke-toggle, #tp-shuffle, #tp-repeat, .np { display: none; }
+  .playerbar { grid-template-columns: minmax(0, 1fr) auto; }
+}
+@media (max-height: 520px) {
+  #main-window > .statusbar { display: none; }
+}
+@media (max-height: 460px) {
+  .taskbar { display: none; }
+}
+@media (max-height: 300px) {
+  .toolbar { display: none; }
+}
+
+/* Update notice */
+.balloon {
+  position: fixed; right: 6px; bottom: 34px; z-index: 38;
+  width: 236px; max-width: calc(100vw - 12px); padding: 6px 8px 8px;
+  display: grid; gap: 4px;
+  background: var(--tooltip); color: #000; border: 1px solid #000; box-shadow: 2px 2px 0 rgba(0, 0, 0, .35);
+}
+.balloon::after {
+  content: ""; position: absolute; right: 22px; bottom: -8px; width: 12px; height: 8px;
+  background: #000; clip-path: polygon(0 0, 100% 0, 100% 100%);
+}
+.balloon p { margin: 0; }
+.balloon > .caption { position: absolute; top: 4px; right: 4px; }
+.balloon-buttons { display: flex; justify-content: flex-end; gap: 4px; margin-top: 4px; }
+.balloon-buttons button { min-width: 62px; }
+.update-notes { max-height: 140px; overflow-y: auto; padding: 4px 6px; white-space: pre-wrap; overflow-wrap: anywhere; background: #fff; user-select: text; -webkit-user-select: text; }
+.update-progress { display: grid; gap: 8px; min-width: 0; }
+.progress { height: 20px; padding: 2px; background: #fff; }
+.progress-fill {
+  width: 0; height: 100%;
+  background: repeating-linear-gradient(90deg, var(--select) 0 9px, transparent 9px 11px);
+}

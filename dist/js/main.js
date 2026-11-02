@@ -3,6 +3,7 @@
 import { api } from './api.js';
 import { clear, el, errorText, fmtTime, setStatus } from './dom.js';
 import { icon, setIcon } from './icons.js';
+import { checkForUpdates, watchForUpdates } from './updates.js';
 import { aboutDialog, audioSetupDialog, closeMenu, logonDialog, message, showMenu } from './dialogs.js';
 import { isLiked, loadSession, onSessionChange, session, toggleLike } from './session.js';
 import {
@@ -102,6 +103,8 @@ function menuDefinitions() {
       { label: `Repeat: ${{ off: 'Off', all: 'All', one: 'One' }[player.repeat]}`, action: cycleRepeat },
     ],
     Help: [
+      { label: 'Check for Updates...', action: checkForUpdates },
+      'sep',
       { label: 'About Sound95', action: aboutDialog },
     ],
   };
@@ -164,9 +167,10 @@ function treeItem(iconName, label, route) {
   const selected = current && route.name === current.name && route.urn === current.urn;
   return el('div', {
     class: `tree-item${selected ? ' selected' : ''}`,
+    title: label,
     onClick: () => go(route),
     onContextmenu: (e) => e.preventDefault(),
-  }, icon(iconName), el('span', { title: label }, label));
+  }, icon(iconName), el('span', {}, label));
 }
 
 function renderSidebar() {
@@ -401,7 +405,17 @@ async function boot() {
   const narrow = window.matchMedia('(max-width: 1000px)').matches;
   if (savedQueue === '0' || (narrow && savedQueue === null)) $('workspace').classList.add('no-queue');
   $('queue-toggle').classList.toggle('on', !$('workspace').classList.contains('no-queue'));
+  // A tile too small for both shows the page, and the button can still swap them.
+  const tiny = window.matchMedia('(max-width: 560px)');
+  const pageFirst = () => {
+    if (!tiny.matches) return;
+    $('workspace').classList.add('no-queue');
+    $('queue-toggle').classList.remove('on');
+  };
+  tiny.addEventListener('change', pageFirst);
+  pageFirst();
   restorePlayer();
+  watchForUpdates();
   attachVisual($('mini-viz'));
   $('volume').value = Math.round(getVolume() * 100);
   renderVolume();

@@ -3,6 +3,7 @@ mod client;
 mod login;
 mod lyrics;
 mod store;
+mod update;
 mod visual;
 
 use client::{AppError, Client};
@@ -164,6 +165,22 @@ fn visual_stop(visual: State<'_, visual::Visual>) {
 }
 
 #[tauri::command]
+async fn update_check(
+    handle: AppHandle,
+    pending: State<'_, update::Pending>,
+) -> Result<Option<update::Available>, AppError> {
+    update::check(&handle, &pending).await
+}
+
+#[tauri::command]
+async fn update_install(
+    handle: AppHandle,
+    pending: State<'_, update::Pending>,
+) -> Result<(), AppError> {
+    update::install(&handle, &pending).await
+}
+
+#[tauri::command]
 async fn audio_status() -> Result<audio::AudioStatus, AppError> {
     tauri::async_runtime::spawn_blocking(audio::status)
         .await
@@ -207,6 +224,7 @@ pub fn run() {
     });
     builder
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .on_window_event(|window, event| {
             if window.label() == "main" && matches!(event, tauri::WindowEvent::Destroyed) {
                 login::close_all(window.app_handle());
@@ -221,6 +239,13 @@ pub fn run() {
                 renewing: Mutex::new(()),
             });
             app.manage(visual::Visual::default());
+            app.manage(update::Pending::default());
+            // Not on Linux: a tiling compositor scales a window that wants more
+            // than its tile, and the pointer stops lining up with the page.
+            #[cfg(not(target_os = "linux"))]
+            if let Some(window) = app.get_webview_window("main") {
+                window.set_min_size(Some(tauri::LogicalSize::new(480.0, 360.0)))?;
+            }
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -235,6 +260,8 @@ pub fn run() {
             waveform,
             visual_start,
             visual_stop,
+            update_check,
+            update_install,
             audio_status,
             audio_install,
             relaunch

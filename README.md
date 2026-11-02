@@ -4,13 +4,35 @@ A Windows 95 style desktop client for SoundCloud, laid out like Spotify: library
 tree, main pane, Up Next queue and a bottom player bar. Built with Tauri 2, Rust and
 plain JavaScript, with no frontend build step.
 
+![Sound95 playing a track with the Visualizer open](docs/screenshot.png)
+
 ## Install
 
-Download a build from [Releases](https://github.com/FO4AN/soundscape/releases) and run it.
-Click **Log In** and sign in on SoundCloud's own page, in the window that opens. There is
-nothing else to set up. Your likes, playlists and follows live on SoundCloud, so they sync
-everywhere. Missing audio plug-ins install themselves after one password prompt (pacman,
-apt, dnf or zypper).
+Get the latest build from [Releases](https://github.com/FO4AN/sound95/releases/latest).
+
+**Windows 10 or 11 (64-bit):** download `Sound95_*_x64-setup.exe` and run it. It installs
+for your user only, so it doesn't need administrator rights. The installer isn't code
+signed yet, so SmartScreen may warn you: choose **More info**, then **Run anyway**.
+
+**Linux (x86-64):** this installs the app and a menu entry, with no root needed.
+
+```bash
+curl -fsSL https://github.com/FO4AN/sound95/releases/latest/download/install-linux.sh | bash
+```
+
+There's also a `.deb` for Debian and Ubuntu, and you can run the `.AppImage` directly.
+
+Click **Log In** and sign in on SoundCloud's own page, in the window that opens. There's
+nothing else to set up. Your likes, playlists and follows live on SoundCloud, so they
+sync everywhere.
+
+## Updates
+
+Sound95 checks this repository's releases when it starts and every six hours. When
+there's a newer version, a notice appears above the taskbar: **Details...** shows what
+changed and **Update Now** installs it and restarts the app. **Help > Check for Updates**
+does the same on demand. Releases are signed, and an update that doesn't match the key
+built into the app is refused.
 
 ## Features
 
@@ -22,17 +44,33 @@ apt, dnf or zypper).
   words earlier and `]` later. If a song only has plain text, the timing is a guess, and **Tap to
   Sync** lets you fix it: press Space as each line starts and it's saved for that track.
   **Paste Lyrics** covers songs nobody has published words for.
+- **Any window size.** The layout folds down to fit a small window or a tiling tile.
 
 ## Build
+
+Needs Rust. On Linux you also need the WebKitGTK 4.1 development packages. On Windows
+you need the Visual Studio C++ build tools.
 
 ```bash
 cd src-tauri
 cargo build --release           # target/release/sound95
-cargo install tauri-cli --version "^2" --locked && cargo tauri build   # deb + AppImage
+npx @tauri-apps/cli@2 build     # installers
 ```
 
 The frontend in `dist/` is embedded at compile time, so rebuild after changing it.
-Pushing a `v*` tag builds a GitHub release.
+
+## Releasing
+
+Bump the version in `src-tauri/Cargo.toml` and `src-tauri/tauri.conf.json`, then push an
+annotated tag. Its message becomes the release notes that the update dialog shows.
+
+```bash
+git tag -a v0.5.0 -m "What changed" && git push origin v0.5.0
+```
+
+The Release workflow builds both installers on GitHub, signs them with the
+`TAURI_SIGNING_PRIVATE_KEY` secret and publishes them together. Keep a copy of that key:
+without it, installed copies can't update to a new build.
 
 ## How it works
 
@@ -48,16 +86,17 @@ Pushing a `v*` tag builds a GitHub release.
   the words when they don't. It works out the artist and song from messy titles, checks
   each result against the track's name and length, and scales the timing of sped-up
   uploads. Hosts are fixed in the code and no SoundCloud session is sent to them.
-- `src-tauri/src/visual.rs`: taps the app's own audio through PipeWire (`pw-record`) and
-  turns it into frequency bands, because the page can't read SoundCloud's player. It
-  only touches this app's streams and never opens a microphone, though a desktop that
-  flags any audio capture may show a recording icon. It also reads the output device's
-  delay, about 300 ms on Bluetooth, so words and bars match what you hear. Without PipeWire, the visualizer
-  follows the track's published loudness and says so in its status bar.
+- `src-tauri/src/visual.rs`: turns the app's own audio into frequency bands, because the
+  page can't read SoundCloud's player. `capture_linux.rs` taps this app's streams through
+  PipeWire (`pw-record`) and reads the output device's delay, about 300 ms on Bluetooth, so
+  words and bars match what you hear. `capture_windows.rs` uses WASAPI process loopback,
+  which needs Windows 10 2004 or later. Neither opens a microphone, though a desktop that
+  flags any audio capture may show a recording icon. Without either, the visualizer follows
+  the track's published loudness and says so in its status bar.
+- `src-tauri/src/update.rs`, `dist/js/updates.js`: the update check, notice and installer.
 - `dist/js/player.js`: plays through SoundCloud's official
   [Widget](https://developers.soundcloud.com/docs/api/html5-widget), so listeners stream
   directly and don't use the app's stream limit. The player bar controls it.
-- `dist/js/karaoke.js`, `visualizer.js`, `waveform.js`, `windows.js`: the new windows.
 - `dist/js/`: the rest of the UI.
 
 ## Testing
@@ -69,6 +108,7 @@ cd .. && OUT=/tmp/s95 tools/e2e.sh   # needs a debug build
 
 `tools/mock-soundcloud.mjs` stands in for SoundCloud, including its sign-in page, and
 `tools/e2e.sh` drives the real app against it. The test hooks only exist in debug builds.
+CI runs the tests on Linux and Windows, and the app test on Windows.
 
 ## SoundCloud API terms
 

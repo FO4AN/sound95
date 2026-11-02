@@ -128,12 +128,13 @@ export function audioSetupDialog() {
   });
 }
 
-export function aboutDialog() {
+export async function aboutDialog() {
+  const version = await api.version();
   return dialog('About Sound95', (close) => ({
     body: el('div', { class: 'dialog-row' },
       el('span', { class: 'about-art' }, icon('note')),
       el('div', { style: 'display:grid;gap:6px' },
-        el('p', {}, el('b', {}, 'Sound95'), ' version 0.3'),
+        el('p', {}, el('b', {}, 'Sound95'), ` version ${version}`),
         el('p', {}, 'A Windows 95 style client for SoundCloud.'),
         el('p', { class: 'tiny' }, 'All music streams from SoundCloud and belongs to its uploaders. Sound95 is not affiliated with SoundCloud or Microsoft. Nothing is saved for offline use.'),
         el('p', { class: 'tiny' }, 'Lyrics come from LRCLIB, NetEase and Genius, and belong to their writers.'),

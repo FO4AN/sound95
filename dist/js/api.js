@@ -40,6 +40,9 @@ export const api = {
   audioStatus: () => invoke('audio_status'),
   audioInstall: () => invoke('audio_install'),
   relaunch: () => invoke('relaunch'),
+  version: () => window.__TAURI__.app.getVersion(),
+  updateCheck: () => invoke('update_check'),
+  updateInstall: () => invoke('update_install'),
 };
 
 export function normalizeTrack(raw) {

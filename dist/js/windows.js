@@ -55,11 +55,19 @@ export function floatWindow({ id, title, iconName, width, height, minWidth = 280
       Object.assign(node.style, { left: `${area.left}px`, top: `${area.top}px`, width: `${area.width}px`, height: `${area.height}px` });
       return;
     }
-    place.w = Math.max(minWidth, Math.min(place.w, window.innerWidth));
-    place.h = Math.max(minHeight, Math.min(place.h, window.innerHeight));
+    place.w = Math.min(Math.max(minWidth, place.w), window.innerWidth);
+    place.h = Math.min(Math.max(minHeight, place.h), window.innerHeight);
     place.x = Math.max(EDGE - place.w, Math.min(place.x, window.innerWidth - EDGE));
     place.y = Math.max(0, Math.min(place.y, window.innerHeight - EDGE));
     Object.assign(node.style, { left: `${place.x}px`, top: `${place.y}px`, width: `${place.w}px`, height: `${place.h}px` });
+  };
+
+  /** Brings the whole window back in after the app has shrunk around it. */
+  const fit = () => {
+    apply();
+    place.x = Math.max(0, Math.min(place.x, window.innerWidth - place.w));
+    place.y = Math.max(0, Math.min(place.y, window.innerHeight - place.h));
+    apply();
   };
 
   const tracked = (move, done) => (down) => {
@@ -102,7 +110,7 @@ export function floatWindow({ id, title, iconName, width, height, minWidth = 280
       if (!open.delete(win)) return;
       closeMenu();
       node.remove();
-      window.removeEventListener('resize', apply);
+      window.removeEventListener('resize', fit);
       onClose?.();
     },
   };
@@ -123,10 +131,10 @@ export function floatWindow({ id, title, iconName, width, height, minWidth = 280
     menubar.append(titleNode);
   }
 
-  window.addEventListener('resize', apply);
+  window.addEventListener('resize', fit);
   open.add(win);
   document.getElementById('floats').append(node);
-  apply();
+  fit();
   focus(win);
   return win;
 }
