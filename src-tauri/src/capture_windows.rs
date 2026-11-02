@@ -3,7 +3,7 @@
 //! never touches a microphone. Windows doesn't report a Bluetooth headset's delay,
 //! so the output delay stays at zero.
 
-use super::{Heard, FFT, RATE};
+use super::{Heard, FFT, RATE, SILENCE};
 use std::{
     collections::VecDeque,
     sync::{
@@ -74,17 +74,23 @@ fn listen(
             ring.lock().expect("ring").clear();
             continue;
         }
-        live.store(true, Ordering::Relaxed);
         packets.read_from_device_to_deque(&mut bytes)?;
         let whole = bytes.len() - bytes.len() % FRAME_BYTES;
         let frames: Vec<u8> = bytes.drain(..whole).collect();
+        let mut loudest: f32 = 0.0;
         let mut samples = ring.lock().expect("ring");
         for frame in frames.as_chunks::<FRAME_BYTES>().0 {
             if samples.len() == FFT {
                 samples.pop_front();
             }
-            samples.push_back((sample(&frame[..4]) + sample(&frame[4..])) / 2.0);
+            let value = (sample(&frame[..4]) + sample(&frame[4..])) / 2.0;
+            loudest = loudest.max(value.abs());
+            samples.push_back(value);
         }
+        // Windows can send silence for a process that isn't playing, so packets
+        // alone don't prove we can hear it. A real gap in a song is short, and the
+        // page waits a few seconds before giving up.
+        live.store(loudest > SILENCE, Ordering::Relaxed);
     }
     client.stop_stream()?;
     Ok(())

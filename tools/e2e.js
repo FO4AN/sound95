@@ -199,6 +199,7 @@
       return lit;
     };
     await check(() => greens().length > 200, 'bars rise with the music', 15000);
+    await log(`INFO ${floatStatus('Visualizer')}, ${greens().length} lit`);
     await log(`CPU-WINDOW-START`);
     const litBefore = greens().join();
     await sleep(600);
