@@ -1,7 +1,9 @@
 mod audio;
 mod client;
 mod login;
+mod lyrics;
 mod store;
+mod visual;
 
 use client::{AppError, Client};
 use reqwest::Method;
@@ -142,6 +144,26 @@ fn open_link(handle: tauri::AppHandle, url: String) -> Result<(), AppError> {
 }
 
 #[tauri::command]
+async fn lyrics_search(request: lyrics::Request) -> Result<Vec<lyrics::Lyrics>, AppError> {
+    lyrics::search(request).await
+}
+
+#[tauri::command]
+async fn waveform(app: State<'_, App>, url: String) -> Result<Value, AppError> {
+    app.client.waveform(&url).await
+}
+
+#[tauri::command]
+fn visual_start(visual: State<'_, visual::Visual>, handle: AppHandle) -> bool {
+    visual.start(handle)
+}
+
+#[tauri::command]
+fn visual_stop(visual: State<'_, visual::Visual>) {
+    visual.stop();
+}
+
+#[tauri::command]
 async fn audio_status() -> Result<audio::AudioStatus, AppError> {
     tauri::async_runtime::spawn_blocking(audio::status)
         .await
@@ -188,6 +210,7 @@ pub fn run() {
         .on_window_event(|window, event| {
             if window.label() == "main" && matches!(event, tauri::WindowEvent::Destroyed) {
                 login::close_all(window.app_handle());
+                window.state::<visual::Visual>().stop();
             }
         })
         .setup(|app| {
@@ -197,6 +220,7 @@ pub fn run() {
                 client,
                 renewing: Mutex::new(()),
             });
+            app.manage(visual::Visual::default());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -207,6 +231,10 @@ pub fn run() {
             api_get,
             api_send,
             open_link,
+            lyrics_search,
+            waveform,
+            visual_start,
+            visual_stop,
             audio_status,
             audio_install,
             relaunch

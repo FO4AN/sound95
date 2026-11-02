@@ -116,9 +116,7 @@ pub async fn renew(handle: &AppHandle, rejected: &str) -> Option<Token> {
     let mut access = None;
     while access.is_none() && started.elapsed() < RENEW_TIMEOUT {
         tokio::time::sleep(POLL).await;
-        if handle.get_webview_window(RENEW_WINDOW).is_none() {
-            return None;
-        }
+        handle.get_webview_window(RENEW_WINDOW)?;
         access = session(&window).filter(|s| s != rejected);
     }
     let _ = window.destroy();

@@ -10,8 +10,10 @@ import {
   prev, restorePlayer, seekTo, setVolume, togglePlay, toggleShuffle,
 } from './player.js';
 import {
-  back, canGoBack, canGoForward, createPlaylist, currentRoute, forward, go, onNavigate, refresh, syncRows,
+  back, canGoBack, canGoForward, createPlaylist, currentRoute, forward, go, onNavigate, openTrack, refresh, syncRows,
 } from './views.js';
+import { attachVisual, onVisualizerToggle, toggleVisualizer, visualizerOpen } from './visualizer.js';
+import { karaokeOpen, onKaraokeToggle, toggleKaraoke } from './karaoke.js';
 
 const $ = (id) => document.getElementById(id);
 const appWindow = () => window.__TAURI__.window.getCurrentWindow();
@@ -29,6 +31,8 @@ setIcon($('tp-prev'), 'prev');
 setIcon($('tp-next'), 'next');
 setIcon($('tp-shuffle'), 'shuffle');
 setIcon($('queue-toggle'), 'queue');
+setIcon($('viz-toggle'), 'bars');
+setIcon($('karaoke-toggle'), 'mic');
 setIcon($('np-like'), 'heart');
 setIcon($('tray-speaker'), 'speaker');
 $('start-icon').append(icon('note'));
@@ -85,6 +89,8 @@ function menuDefinitions() {
       { label: 'Following', checked: route?.name === 'following', action: () => go({ name: 'following' }) },
       'sep',
       { label: 'Up Next', checked: !$('workspace').classList.contains('no-queue'), action: toggleQueue },
+      { label: 'Visualizer', checked: visualizerOpen(), action: toggleVisualizer },
+      { label: 'Karaoke', checked: karaokeOpen(), action: toggleKaraoke },
       { label: 'Refresh', accel: 'F5', action: refresh },
     ],
     Playback: [
@@ -133,6 +139,8 @@ function openStartMenu() {
     { label: 'Discover', icon: 'search', action: () => go({ name: 'discover' }) },
     { label: 'Liked Tracks', icon: 'heart-on', action: () => go({ name: 'liked' }) },
     { label: 'Following', icon: 'users', action: () => go({ name: 'following' }) },
+    { label: 'Visualizer', icon: 'bars', action: toggleVisualizer },
+    { label: 'Karaoke', icon: 'mic', action: toggleKaraoke },
     'sep',
     session.user
       ? { label: `Log Off ${session.user.username}...`, icon: 'user', action: logOff }
@@ -221,8 +229,9 @@ function renderPlayer() {
   setIcon($('tp-repeat'), player.repeat === 'one' ? 'repeat-one' : 'repeat');
   $('tp-repeat').title = `Repeat: ${player.repeat}`;
   $('np-title').textContent = track ? track.title : 'Nothing playing';
-  $('np-title').disabled = !track?.link;
-  $('np-title').title = track?.link ? 'Open on SoundCloud' : '';
+  $('np-title').disabled = !track;
+  $('np-title').title = track ? 'Open track page' : '';
+  $('np-art').title = track ? 'Open track page' : '';
   $('np-artist').textContent = track ? `${track.artist}${player.preview ? ' (preview)' : ''}` : '';
   $('np-artist').disabled = !track?.userUrn;
   $('np-like').disabled = !track || !session.user;
@@ -260,7 +269,8 @@ function renderQueue() {
     title: `${t.artist} - ${t.title}`,
     onDblclick: () => jumpTo(i),
   },
-  t.artwork ? el('img', { src: t.artwork, alt: '', loading: 'lazy' }) : el('span', { class: 'q-blank' }, icon('note')),
+  el('button', { class: 'link q-art', title: 'Open track page', onClick: () => openTrack(t, player.queue, i) },
+    t.artwork ? el('img', { src: t.artwork, alt: '', loading: 'lazy' }) : el('span', { class: 'q-blank' }, icon('note'))),
   el('div', { class: 'q-text' }, el('div', {}, t.title), el('div', { class: 'q-artist' }, t.artist)))));
 }
 
@@ -278,7 +288,14 @@ $('tp-repeat').addEventListener('click', cycleRepeat);
 $('queue-toggle').addEventListener('click', toggleQueue);
 $('queue-clear').addEventListener('click', clearUpcoming);
 $('np-like').addEventListener('click', () => player.current && toggleLike(player.current));
-$('np-title').addEventListener('click', () => player.current?.link && api.open(player.current.link));
+const openCurrent = () => player.current && openTrack(player.current, player.queue, player.index);
+$('np-title').addEventListener('click', openCurrent);
+$('np-art').addEventListener('click', openCurrent);
+$('viz-toggle').addEventListener('click', toggleVisualizer);
+$('mini-viz').addEventListener('click', toggleVisualizer);
+$('karaoke-toggle').addEventListener('click', toggleKaraoke);
+onVisualizerToggle(() => $('viz-toggle').classList.toggle('on', visualizerOpen()));
+onKaraokeToggle(() => $('karaoke-toggle').classList.toggle('on', karaokeOpen()));
 $('np-artist').addEventListener('click', () => player.current?.userUrn && go({ name: 'user', urn: player.current.userUrn }));
 
 $('seek').addEventListener('input', () => {
@@ -385,6 +402,7 @@ async function boot() {
   if (savedQueue === '0' || (narrow && savedQueue === null)) $('workspace').classList.add('no-queue');
   $('queue-toggle').classList.toggle('on', !$('workspace').classList.contains('no-queue'));
   restorePlayer();
+  attachVisual($('mini-viz'));
   $('volume').value = Math.round(getVolume() * 100);
   renderVolume();
   await ensureAudio().catch((e) => setStatus(errorText(e), { sticky: true }));

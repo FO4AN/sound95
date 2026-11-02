@@ -6,6 +6,7 @@ import { setStatus } from './dom.js';
 const STORE_KEY = 'sound95.player';
 const MAX_SKIPS = 3;
 const START_TIMEOUT_MS = 15000;
+const PROGRESS_EVERY_MS = 200; // the Widget reports far more often than the bar can show
 const slot = () => document.getElementById('widget-slot');
 
 export const player = {
@@ -20,8 +21,8 @@ export const player = {
 
 const listeners = new Set();
 const progressListeners = new Set();
-export function onPlayerChange(fn) { listeners.add(fn); }
-export function onProgress(fn) { progressListeners.add(fn); }
+export function onPlayerChange(fn) { listeners.add(fn); return () => listeners.delete(fn); }
+export function onProgress(fn) { progressListeners.add(fn); return () => progressListeners.delete(fn); }
 const notify = () => listeners.forEach((fn) => fn());
 function emit() {
   notify();
@@ -32,6 +33,8 @@ let volume = 0.8;
 let widget = null;
 let frame = null;
 let position = 0;
+let positionAt = 0;
+let progressAt = 0;
 let duration = 0;
 let generation = 0;
 let skips = 0;
@@ -80,6 +83,11 @@ const WIDGET_OPTIONS = {
   visual: false,
 };
 
+function setPosition(ms) {
+  position = ms;
+  positionAt = performance.now();
+}
+
 function started(mine) {
   if (mine !== generation) return;
   clearTimeout(startTimer);
@@ -124,15 +132,19 @@ function createWidget(track) {
   });
   widget.bind(Events.PLAY, () => {
     player.playing = true;
+    setPosition(position);
     if (player.loading) started(generation);
     else notify();
   });
   widget.bind(Events.PAUSE, () => {
+    setPosition(livePositionMs());
     player.playing = false;
     notify();
   });
   widget.bind(Events.PLAY_PROGRESS, (e) => {
-    position = e.currentPosition;
+    setPosition(e.currentPosition);
+    if (positionAt - progressAt < PROGRESS_EVERY_MS) return;
+    progressAt = positionAt;
     progressListeners.forEach((fn) => fn());
   });
   widget.bind(Events.FINISH, () => {
@@ -146,7 +158,7 @@ function load(track) {
   const mine = ++generation;
   player.loading = true;
   player.playing = false;
-  position = 0;
+  setPosition(0);
   duration = track.duration || 0;
   emit();
   setStatus(`Opening "${track.title}"...`, { sticky: true });
@@ -260,12 +272,25 @@ export function cycleRepeat() {
 
 export function seekTo(ratio) {
   if (!widget || !duration) return;
-  position = duration * ratio;
+  setPosition(duration * ratio);
+  widget.seekTo(position);
+}
+
+export function seekToMs(ms) {
+  if (!widget) return;
+  setPosition(Math.max(0, ms));
   widget.seekTo(position);
 }
 
 export const durationMs = () => duration || player.current?.duration || 0;
 export const positionMs = () => position;
+
+/** The Widget reports a few times a second, which is too coarse for karaoke. */
+export function livePositionMs() {
+  if (!player.playing) return position;
+  const moved = position + performance.now() - positionAt;
+  return durationMs() ? Math.min(moved, durationMs()) : moved;
+}
 
 export function setVolume(v) {
   volume = Math.min(1, Math.max(0, v));

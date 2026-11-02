@@ -11,9 +11,9 @@ MOCK=$!
 trap 'kill $MOCK ${APP:-} 2>/dev/null' EXIT
 sleep 0.5
 BASE=http://127.0.0.1:${MOCK_PORT:-17996}
-env XDG_CONFIG_HOME="$OUT/cfg" XDG_DATA_HOME="$OUT/data" SOUND95_API_BASE=$BASE SOUND95_SIGNIN_URL=$BASE/signin SOUND95_RENEW_URL=$BASE/ \
+env XDG_CONFIG_HOME="$OUT/cfg" XDG_DATA_HOME="$OUT/data" SOUND95_API_BASE=$BASE SOUND95_LYRICS_BASE=$BASE SOUND95_SIGNIN_URL=$BASE/signin SOUND95_RENEW_URL=$BASE/ \
   SOUND95_NO_BROWSER=1 SOUND95_E2E="$ROOT/tools/e2e.js" GST_REGISTRY="$OUT/reg.bin" \
-  "$ROOT/src-tauri/target/debug/sound95" > "$OUT/app.log" 2>&1 &
+  "${SOUND95_BIN:-$ROOT/src-tauri/target/debug/sound95}" > "$OUT/app.log" 2>&1 &
 APP=$!
 shot() {
   sleep 0.4
@@ -22,7 +22,7 @@ shot() {
   [ -n "$at" ] && grim -g "$at" "$OUT/$1.png"
 }
 seen=0
-for _ in $(seq 1 900); do
+for _ in $(seq 1 1800); do
   sleep 0.1
   mapfile -t lines < <(grep '^E2E ' "$OUT/mock.log" | tail -n +$((seen + 1)))
   for line in "${lines[@]}"; do

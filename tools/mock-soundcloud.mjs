@@ -44,6 +44,8 @@ const track = (i) => {
     duration: 120000 + i * 17000, user: USERS[i % USERS.length], artwork_url: '',
     playback_count: 500 + i * i * 3127, access: null, policy: i === 6 ? 'SNIP' : i === 7 ? 'BLOCK' : 'ALLOW',
     permalink_url: `https://soundcloud.com/mock/track-${i + 1}`,
+    waveform_url: `${ORIGIN}/wave/${id}.json`, description: 'Recorded on a 486.\nSecond line.', genre: 'Ambient',
+    tag_list: 'modem "dial up"', likes_count: 42, reposts_count: 7, comment_count: 3, display_date: '2026-01-02T00:00:00Z',
   };
 };
 const TRACKS = Array.from({ length: 80 }, (_, i) => track(i));
@@ -110,6 +112,54 @@ function bearer(req) {
   return match ? access.has(match[1]) : false;
 }
 
+// Lyrics: one track per kind of result. The first LRCLIB call gets the 503 the real
+// one hands out so often.
+const stamp = (ms) => `${String(Math.floor(ms / 60000)).padStart(2, '0')}:${((ms % 60000) / 1000).toFixed(2).padStart(5, '0')}`;
+const TIMED = Array.from({ length: 60 }, (_, i) => `[${stamp(1000 + i * 2000)}]Timed line ${i}`).join('\n');
+const BY_WORD = Array.from({ length: 60 }, (_, i) => {
+  const at = 1000 + i * 2000;
+  return `[${at},1800](${at},600,0)Word (${at + 600},600,0)timed (${at + 1200},600,0)${i}`;
+}).join('\n');
+let lrclibCalls = 0;
+
+function lyricsRoute(path, url, res) {
+  if (path === '/lrclib/api/search') {
+    lrclibCalls += 1;
+    if (lrclibCalls === 1) {
+      res.writeHead(503, { 'Retry-After': '1' });
+      res.end();
+      return true;
+    }
+    const asked = `${url.searchParams.get('track_name')} ${url.searchParams.get('q')}`;
+    json(res, 200, asked.includes('Dial-Up Lullaby') ? [{
+      trackName: 'Dial-Up Lullaby', artistName: 'Night Modem', duration: 120, instrumental: false,
+      plainLyrics: 'Timed line 0', syncedLyrics: TIMED,
+    }] : []);
+    return true;
+  }
+  if (path === '/netease/api/search/get') {
+    const found = (url.searchParams.get('s') || '').includes('Blue Screen Sunrise');
+    json(res, 200, { result: { songs: found ? [{ id: 5, name: 'Blue Screen Sunrise', duration: 137000, artists: [{ name: 'Tape Deck Tuesday' }] }] : [] } });
+    return true;
+  }
+  if (path === '/netease/api/song/lyric/v1') {
+    json(res, 200, { lrc: { lyric: TIMED }, yrc: { lyric: BY_WORD } });
+    return true;
+  }
+  if (path === '/genius/api/search/multi') {
+    const found = (url.searchParams.get('q') || '').includes('Defrag');
+    json(res, 200, { response: { sections: [{ hits: found ? [{ type: 'song', result: {
+      title: 'Defrag', artist_names: 'Cassandra Vale', url: `${ORIGIN}/genius/defrag-lyrics`, lyrics_state: 'complete', instrumental: false,
+    } }] : [] }] } });
+    return true;
+  }
+  if (path === '/genius/defrag-lyrics') {
+    html(res, '<div data-lyrics-container="true"><div data-exclude-from-selection="true">3 Contributors</div>[Verse]<br/>Plain first line<br/>Plain second line<br/>Plain third line</div>');
+    return true;
+  }
+  return false;
+}
+
 const server = createServer(async (req, res) => {
   const url = new URL(req.url, ORIGIN);
   const path = decodeURIComponent(url.pathname);
@@ -121,6 +171,10 @@ const server = createServer(async (req, res) => {
   if (path === '/__expire') { access.clear(); return json(res, 200, { ok: true }); }
   if (path === '/__revoke') { access.clear(); refresh.clear(); return json(res, 200, { ok: true }); }
   if (path === '/__signin') return json(res, 200, signIn);
+  if (path.startsWith('/wave/')) {
+    return json(res, 200, { width: 1800, height: 140, samples: Array.from({ length: 1800 }, (_, i) => 40 + (i % 90)) });
+  }
+  if (lyricsRoute(path, url, res)) return undefined;
 
   if (path === '/signin') {
     signIn.leftover = !!cookie(req, 'oauth_token') || !!cookie(req, 'oauth_refresh_token');
@@ -166,6 +220,10 @@ const server = createServer(async (req, res) => {
     }
     if (path === '/search/playlists') return json(res, 200, collection(playlists.map(playlistJson), url));
     if (path === '/search/users') return json(res, 200, collection(USERS, url));
+    if ((match = m(/^\/tracks\/(\d+)$/))) {
+      const t = TRACKS.find((x) => x.id === Number(match[1]));
+      return t ? json(res, 200, t) : json(res, 404, {});
+    }
     if ((match = m(/^\/tracks\/(\d+)\/related$/))) return json(res, 200, collection(TRACKS.slice(30, 40), url));
     if ((match = m(/^\/playlists\/(\d+)$/))) {
       const p = playlists.find((x) => x.id === Number(match[1]));

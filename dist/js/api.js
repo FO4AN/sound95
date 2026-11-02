@@ -33,6 +33,10 @@ export const api = {
   get: (target) => invoke('api_get', { target }),
   send: (method, path, body = null) => invoke('api_send', { method, path, body }),
   open: (link) => invoke('open_link', { url: link }),
+  lyrics: (request) => invoke('lyrics_search', { request }),
+  waveform: (link) => invoke('waveform', { url: link }),
+  visualStart: () => invoke('visual_start'),
+  visualStop: () => invoke('visual_stop'),
   audioStatus: () => invoke('audio_status'),
   audioInstall: () => invoke('audio_install'),
   relaunch: () => invoke('relaunch'),
@@ -50,10 +54,27 @@ export function normalizeTrack(raw) {
     uploader: track.user?.username || '',
     userUrn: track.user?.urn || null,
     duration: track.duration || 0,
+    fullDuration: track.full_duration || track.duration || 0,
     plays: track.playback_count ?? null,
     artwork: track.artwork_url || track.user?.avatar_url || '',
     link: track.permalink_url || '',
     access: track.access || ACCESS[track.policy] || 'playable',
+  };
+}
+
+/** Everything the track page shows. Kept apart so the saved queue stays small. */
+export function trackDetails(raw) {
+  return {
+    ...normalizeTrack(raw),
+    waveform: raw.waveform_url || '',
+    description: raw.description || '',
+    genre: raw.genre || '',
+    tags: raw.tag_list || '',
+    likes: raw.likes_count ?? null,
+    reposts: raw.reposts_count ?? null,
+    comments: raw.comment_count ?? null,
+    released: raw.display_date || raw.created_at || '',
+    label: raw.label_name || raw.publisher_metadata?.publisher || '',
   };
 }
 
@@ -87,6 +108,10 @@ export function normalizeUser(raw) {
 
 export function bigArt(src) {
   return src ? src.replace('-large.', '-t300x300.') : '';
+}
+
+export function smallArt(src) {
+  return src ? src.replace('-large.', '-small.') : '';
 }
 
 /** api-v2 only fills in a playlist's first few tracks, so the rest come by ID. */
@@ -134,6 +159,7 @@ export const paths = {
   userTracks: (urn) => paged(`/users/${idOf(urn)}/tracks`),
   userPlaylists: (urn) => paged(`/users/${idOf(urn)}/playlists_without_albums`),
   userLikes: (urn) => paged(`/users/${idOf(urn)}/track_likes`),
+  track: (urn) => `/tracks/${idOf(urn)}`,
   related: (urn) => paged(`/tracks/${idOf(urn)}/related`),
 };
 

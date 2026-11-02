@@ -133,9 +133,10 @@ export function aboutDialog() {
     body: el('div', { class: 'dialog-row' },
       el('span', { class: 'about-art' }, icon('note')),
       el('div', { style: 'display:grid;gap:6px' },
-        el('p', {}, el('b', {}, 'Sound95'), ' version 0.2'),
+        el('p', {}, el('b', {}, 'Sound95'), ' version 0.3'),
         el('p', {}, 'A Windows 95 style client for SoundCloud.'),
         el('p', { class: 'tiny' }, 'All music streams from SoundCloud and belongs to its uploaders. Sound95 is not affiliated with SoundCloud or Microsoft. Nothing is saved for offline use.'),
+        el('p', { class: 'tiny' }, 'Lyrics come from LRCLIB, NetEase and Genius, and belong to their writers.'),
         el('p', { class: 'tiny' }, 'Pixel font from 98.css (MIT).'))),
     buttons: [el('button', { class: 'default', onClick: () => close() }, 'OK')],
   }), { width: 360 });

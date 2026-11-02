@@ -11,7 +11,7 @@ export const session = {
 };
 
 const listeners = new Set();
-export function onSessionChange(fn) { listeners.add(fn); }
+export function onSessionChange(fn) { listeners.add(fn); return () => listeners.delete(fn); }
 export function emitChange() { listeners.forEach((fn) => fn()); }
 
 export async function loadSession() {

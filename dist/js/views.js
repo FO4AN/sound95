@@ -1,13 +1,18 @@
 // Main-pane views and the back/forward history.
 
 import {
-  api, bigArt, idOf, normalizeFeedItem, normalizePlaylist, normalizeTrack, normalizeUser, page, paths,
+  api, bigArt, idOf, normalizeFeedItem, normalizePlaylist, normalizeTrack, normalizeUser, page, paths, smallArt,
+  trackDetails,
 } from './api.js';
-import { clear, el, errorText, fmtCount, fmtTime, setStatus } from './dom.js';
+import { clear, el, errorText, fmtCount, fmtTime, setStatus, whileShown } from './dom.js';
 import { icon } from './icons.js';
 import { dialog, prompt, showMenu } from './dialogs.js';
-import { emitChange, isLiked, session, toggleLike } from './session.js';
-import { enqueue, playList, player } from './player.js';
+import { emitChange, isLiked, onSessionChange, session, toggleLike } from './session.js';
+import { enqueue, onPlayerChange, playList, player, togglePlay } from './player.js';
+import { waveformView } from './waveform.js';
+import { lyricsFor, showKaraoke } from './karaoke.js';
+
+const DOUBLE_CLICK_MS = 220;
 
 const content = document.getElementById('content');
 const stack = [];
@@ -74,6 +79,8 @@ export function syncRows() {
 function trackMenu(track, list, index, x, y) {
   const canUse = track.access !== 'blocked';
   const items = [
+    { label: 'Track Page', action: () => openTrack(track, list, index) },
+    'sep',
     { label: 'Play', disabled: !canUse, action: () => playList(list, index) },
     { label: 'Play Next', disabled: !canUse, action: () => enqueue(track, { nextUp: true }) },
     { label: 'Add to Up Next', disabled: !canUse, action: () => enqueue(track) },
@@ -88,10 +95,20 @@ function trackMenu(track, list, index, x, y) {
   showMenu(items, x, y);
 }
 
+export function openTrack(track, list, index) {
+  go({ name: 'track', urn: track.urn, list, index });
+}
+
 function trackRow(track, list, index) {
   const num = el('span', { class: 'num' });
   const heart = el('span', { class: 'heart' });
   const blocked = track.access === 'blocked';
+  // A double click still has to play, so a click waits to see if another follows.
+  let opening;
+  const openSoon = () => {
+    clearTimeout(opening);
+    opening = setTimeout(() => openTrack(track, list, index), DOUBLE_CLICK_MS);
+  };
   const node = el('div', {
     class: `row${blocked ? ' blocked' : ''}`,
     onClick: (e) => {
@@ -99,7 +116,10 @@ function trackRow(track, list, index) {
       node.classList.add('selected');
       if (e.target.closest('.heart')) toggleLike(track);
     },
-    onDblclick: (e) => { if (!blocked && !e.target.closest('.heart')) playList(list, index); },
+    onDblclick: (e) => {
+      clearTimeout(opening);
+      if (!blocked && !e.target.closest('.heart')) playList(list, index);
+    },
     onContextmenu: (e) => {
       e.preventDefault();
       node.click();
@@ -108,12 +128,14 @@ function trackRow(track, list, index) {
   },
   num,
   heart,
+  el('button', { class: 'link row-art', title: 'Open track page', onClick: openSoon },
+    track.artwork ? el('img', { src: smallArt(track.artwork), alt: '', loading: 'lazy' }) : icon('note')),
   el('span', { class: 'title-wrap' },
-    el('span', { class: 'title', title: track.title }, track.title),
+    el('button', { class: 'link title', title: track.title, onClick: openSoon }, track.title),
     track.access === 'preview' ? el('span', { class: 'badge' }, 'Preview') : null,
     blocked ? el('span', { class: 'badge' }, 'Blocked') : null),
   el('button', {
-    class: 'link',
+    class: 'link artist',
     disabled: !track.userUrn,
     title: track.uploader,
     onClick: (e) => { e.stopPropagation(); go({ name: 'user', urn: track.userUrn }); },
@@ -154,7 +176,7 @@ function trackList(first, load) {
 
   const node = el('div', { class: 'list' },
     el('div', { class: 'list-head' },
-      el('span', { class: 'num' }, '#'), el('span', {}), el('span', {}, 'Title'),
+      el('span', { class: 'num' }, '#'), el('span', {}), el('span', {}), el('span', {}, 'Title'),
       el('span', {}, 'Artist'), el('span', { class: 'plays' }, 'Plays'), el('span', { class: 'dur' }, 'Time')),
     body, more);
   return { node, tracks };
@@ -415,6 +437,104 @@ async function userView(route) {
     body);
 }
 
+function property(name, value) {
+  return value == null || value === '' ? null : [el('span', { class: 'prop-name' }, `${name}:`), el('span', { class: 'prop-value' }, value)];
+}
+
+function trackProperties(track) {
+  const released = track.released ? new Date(track.released).toLocaleDateString() : '';
+  const tags = (track.tags.match(/"[^"]+"|\S+/g) || []).map((t) => t.replaceAll('"', '')).join(', ');
+  return el('div', { class: 'view' },
+    el('fieldset', { class: 'props' },
+      el('legend', {}, 'Properties'),
+      property('Uploaded by', track.uploader),
+      property('Length', fmtTime(track.fullDuration)),
+      property('Released', released),
+      property('Genre', track.genre),
+      property('Tags', tags),
+      property('Label', track.label),
+      property('Plays', track.plays != null ? track.plays.toLocaleString() : null),
+      property('Likes', track.likes != null ? track.likes.toLocaleString() : null),
+      property('Reposts', track.reposts != null ? track.reposts.toLocaleString() : null),
+      property('Comments', track.comments != null ? track.comments.toLocaleString() : null)),
+    track.description ? el('div', { class: 'shelf-title' }, 'Description') : null,
+    track.description ? el('div', { class: 'description sunken selectable-text' }, track.description) : null);
+}
+
+function trackLyrics(track) {
+  const body = el('div', { class: 'view' }, el('div', { class: 'note' }, 'Searching for lyrics...'));
+  lyricsFor(track).then(([best]) => {
+    if (!best) {
+      clear(body, empty('No lyrics found for this track.'));
+      return;
+    }
+    clear(body,
+      el('div', { class: 'description sunken selectable-text' }, best.lines.map((l) => el('div', { class: 'lyric-line' }, l.text))),
+      el('div', { class: 'note' }, `Lyrics from ${best.source}: ${best.artist} - ${best.title}`));
+  }, (e) => clear(body, el('div', { class: 'note' }, errorText(e))));
+  return body;
+}
+
+async function trackView(route) {
+  const tab = route.tab || 'details';
+  const track = trackDetails(await api.get(paths.track(route.urn)));
+  const blocked = track.access === 'blocked';
+  const isCurrent = () => player.current?.urn === track.urn;
+  const play = () => {
+    const inList = route.list?.[route.index]?.urn === track.urn;
+    playList(inList ? route.list : [track], inList ? route.index : 0);
+  };
+
+  const playToggle = el('button', {
+    class: 'default',
+    disabled: blocked,
+    onClick: () => { if (isCurrent()) togglePlay(); else play(); },
+  });
+  const showPlay = () => {
+    const pausing = isCurrent() && player.playing;
+    clear(playToggle, icon(pausing ? 'pause' : 'play'), pausing ? 'Pause' : 'Play');
+  };
+  showPlay();
+  whileShown(playToggle, onPlayerChange, showPlay);
+
+  const like = el('button', { disabled: !session.user, onClick: () => toggleLike(track) });
+  const showLike = () => clear(like, icon(isLiked(track) ? 'heart-on' : 'heart'), isLiked(track) ? 'Liked' : 'Like');
+  showLike();
+  whileShown(like, onSessionChange, showLike);
+
+  const uploader = el('button', {
+    class: 'link',
+    disabled: !track.userUrn,
+    onClick: () => go({ name: 'user', urn: track.userUrn }),
+  }, track.artist);
+  let body;
+  if (tab === 'lyrics') body = trackLyrics(track);
+  else if (tab === 'related') {
+    const view = await pagedTrackView(paths.related(track.urn));
+    body = view.tracks.length ? view.node : empty('SoundCloud has no related tracks for this one.');
+  } else body = trackProperties(track);
+
+  return el('div', {},
+    hero({ kind: 'Track', title: track.title, meta: uploader, art: track.artwork, fallback: 'note' }),
+    el('div', { class: 'hero-actions' },
+      playToggle,
+      like,
+      el('button', { disabled: blocked, onClick: () => enqueue(track) }, 'Add to Up Next'),
+      el('button', { disabled: !session.user, onClick: () => addToPlaylist(track) }, 'Add to Playlist...'),
+      el('button', {
+        disabled: blocked,
+        onClick: () => {
+          if (!isCurrent()) play();
+          showKaraoke();
+        },
+      }, icon('mic'), 'Karaoke'),
+      track.link ? el('button', { onClick: () => api.open(track.link) }, 'Open on SoundCloud') : null),
+    track.waveform ? el('div', { class: 'wave-row' }, waveformView(track, { onPlay: play })) : null,
+    tabs([['details', 'Details'], ['lyrics', 'Lyrics'], ['related', 'Related Tracks']], tab,
+      (id) => { if (id !== tab) go({ ...route, tab: id }); }),
+    body);
+}
+
 const VIEWS = {
   home: homeView,
   discover: discoverView,
@@ -426,6 +546,7 @@ const VIEWS = {
   playlist: playlistView,
   user: userView,
   related: relatedView,
+  track: trackView,
 };
 
 export async function createPlaylist() {

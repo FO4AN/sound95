@@ -49,6 +49,8 @@ fn api_base() -> String {
     "https://api-v2.soundcloud.com".into()
 }
 
+const WAVE_HOST: &str = "wave.sndcdn.com";
+
 pub struct Client {
     pub http: reqwest::Client,
     api: String,
@@ -130,6 +132,36 @@ impl Client {
             return Err(bad());
         }
         Ok(url)
+    }
+
+    /// Fetches a track's waveform, which lives on its own host and needs no session.
+    pub async fn waveform(&self, target: &str) -> Result<Value, AppError> {
+        let bad = || AppError::new("bad_request", "Refused a waveform from another host.");
+        // Older tracks link a picture of the waveform, with the data beside it.
+        let url = Url::parse(&target.replace(".png", ".json")).map_err(|_| bad())?;
+        let allowed = url.scheme() == "https" && url.host_str() == Some(WAVE_HOST);
+        if !allowed && !self.is_mock(&url) {
+            return Err(bad());
+        }
+        let bytes = self
+            .http
+            .get(url)
+            .timeout(Duration::from_secs(20))
+            .send()
+            .await
+            .and_then(reqwest::Response::error_for_status)
+            .map_err(net_err)?
+            .bytes()
+            .await
+            .map_err(net_err)?;
+        serde_json::from_slice(&bytes)
+            .map_err(|e| AppError::new("http", format!("Unreadable waveform: {e}")))
+    }
+
+    fn is_mock(&self, url: &Url) -> bool {
+        cfg!(debug_assertions)
+            && std::env::var_os("SOUND95_API_BASE").is_some()
+            && Url::parse(&self.api).is_ok_and(|base| base.origin() == url.origin())
     }
 
     pub async fn request(
@@ -224,6 +256,19 @@ mod tests {
         assert!(!write_allowed("PUT", "/users/me/track_likes/1"));
         assert!(!write_allowed("POST", "/me/followings/1?x=1"));
         assert!(!write_allowed("GET", "/me"));
+    }
+
+    #[tokio::test]
+    async fn waveforms_only_come_from_soundcloud() {
+        let c = client();
+        for bad in [
+            "https://evil.example/w.json",
+            "http://wave.sndcdn.com/w.json",
+            "https://wave.sndcdn.com.evil.example/w.json",
+            "file:///etc/passwd",
+        ] {
+            assert_eq!(c.waveform(bad).await.unwrap_err().code, "bad_request");
+        }
     }
 
     #[tokio::test]

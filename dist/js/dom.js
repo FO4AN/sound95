@@ -18,6 +18,19 @@ export function clear(node, ...children) {
   node.replaceChildren(...children.flat(Infinity).filter(Boolean));
 }
 
+/** Runs `fn` on each event from `subscribe`, until `node` has left the page. */
+export function whileShown(node, subscribe, fn) {
+  let shown = false;
+  const stop = subscribe(() => {
+    if (node.isConnected) {
+      shown = true;
+      fn();
+    } else if (shown) {
+      stop();
+    }
+  });
+}
+
 export function fmtTime(ms) {
   if (!Number.isFinite(ms) || ms < 0) return '0:00';
   const total = Math.floor(ms / 1000);

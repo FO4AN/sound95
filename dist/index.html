@@ -74,6 +74,9 @@
           </div>
         </div>
         <div class="np-right">
+          <canvas class="mini-viz" id="mini-viz" title="Open the visualizer"></canvas>
+          <button class="tool toggle" id="viz-toggle" aria-label="Visualizer" title="Visualizer"></button>
+          <button class="tool toggle" id="karaoke-toggle" aria-label="Karaoke" title="Karaoke"></button>
           <button class="tool toggle" id="queue-toggle" aria-label="Up Next" title="Up Next"></button>
           <span class="vol-icon" id="vol-icon"></span>
           <input type="range" class="slider" id="volume" min="0" max="100" value="80" aria-label="Volume">
@@ -96,6 +99,7 @@
       </span>
     </div>
   </div>
+  <div id="floats"></div>
   <div id="overlays"></div>
   <script src="https://w.soundcloud.com/player/api.js"></script>
   <script type="module" src="js/main.js"></script>

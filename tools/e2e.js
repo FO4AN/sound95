@@ -97,11 +97,16 @@
     dbl($$('.row')[0]);
     await check(() => $('#np-title').textContent === 'Dial-Up Lullaby', 'double click loads the now-playing bar');
     await check(() => {
-      const box = $('#widget-slot iframe')?.getBoundingClientRect();
-      return box && box.right <= 0;
+      const slot = getComputedStyle($('#widget-slot'));
+      return $('#widget-slot iframe') && Number(slot.opacity) < 0.05 && slot.pointerEvents === 'none' && Number(slot.zIndex) < 0;
     }, 'SoundCloud player stays out of sight');
     await check(() => seconds() >= 3, 'real audio advances while hidden', 20000);
     await check(() => $('#tp-play').getAttribute('aria-label') === 'Pause', 'player bar shows playing');
+    // WebKit throttles an off-screen player to one report a second, which breaks karaoke.
+    let reports = 0;
+    window.SC.Widget($('#widget-slot iframe')).bind(window.SC.Widget.Events.PLAY_PROGRESS, () => { reports += 1; });
+    await sleep(2000);
+    await check(() => reports >= 16, 'the player reports its position many times a second');
     await log('SHOT playing');
     await sleep(1500);
     $('#seek').value = 500;
@@ -124,6 +129,121 @@
     $('#tp-shuffle').click();
     $('#tp-repeat').click();
     $('#tp-repeat').click();
+
+    // Karaoke follows whatever plays, and each track here gets a different kind of result.
+    const stageText = () => $('.k-stage')?.innerText || '';
+    const floatStatus = (name) => $$('.float').find((w) => w.querySelector('.titlebar-text').textContent === name)?.querySelector('.status-cell').textContent || '';
+    const floatMenu = async (name, item) => {
+      byText('.float .menu-title', name).dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+      await clickText('.menu-item', item);
+    };
+    const sung = () => $$('.k-line.current .k-word').some((w) => parseFloat(w.style.getPropertyValue('--fill')) > 0);
+    $('#karaoke-toggle').click();
+    await check(() => floatStatus('Karaoke').startsWith('NetEase - timed word by word'), 'karaoke uses word timing when it exists', 15000);
+    await log(`INFO ${floatStatus('Karaoke')}`);
+    await check(() => $('.k-line.current') && sung(), 'karaoke wipes through the words', 15000);
+    await log('SHOT karaoke');
+    await sleep(1500);
+    dbl($$('.row')[0]);
+    await check(() => floatStatus('Karaoke').startsWith('LRCLIB - timed by line'), 'karaoke follows the next track, through a 503', 20000);
+    await check(() => {
+      const shown = /Timed line (\d+)/.exec($('.k-line.current')?.textContent || '');
+      return shown && seconds() > 1 && Math.abs(Number(shown[1]) - (seconds() - 1) / 2) <= 1.5;
+    }, 'the current line matches the playback position', 15000);
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: ']', bubbles: true }));
+    await check(() => floatStatus('Karaoke').includes('+0.25s'), 'timing can be nudged');
+    await floatMenu('Lyrics', 'Find Lyrics');
+    await check(() => $$('.pick').length >= 1, 'Find Lyrics lists results');
+    await clickText('.dialog button', 'Cancel');
+    dbl($$('.row')[2]);
+    await check(() => floatStatus('Karaoke').startsWith('Genius - estimated timing'), 'karaoke falls back to plain lyrics with guessed timing', 15000);
+    await check(() => stageText().includes('Plain') || stageText().includes('♪'), 'plain lyrics show on stage');
+    dbl($$('.row')[3]);
+    await check(() => stageText().includes('No lyrics found'), 'a track with no lyrics says so', 15000);
+    await clickText('.k-buttons button', 'Paste Lyrics');
+    (await waitFor(() => $('textarea.paste'), 'paste box')).value = 'One\nTwo\nThree';
+    await clickText('.dialog button', 'OK');
+    await check(() => floatStatus('Karaoke').startsWith('You'), 'pasted lyrics are used');
+    await floatMenu('Lyrics', 'Tap to Sync');
+    for (const expected of ['One', 'Two', 'Three']) {
+      await check(() => $('.k-tap')?.textContent === expected, `tap to sync shows "${expected}"`);
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: ' ', bubbles: true }));
+    }
+    await check(() => floatStatus('Karaoke').includes('your timing'), 'tapped timing is kept');
+    $('#karaoke-toggle').click();
+    await check(() => !$$('.float').length && !$('#karaoke-toggle').classList.contains('on'), 'the karaoke window closes');
+
+    // Real audio, quietly: a muted stream has nothing to analyse.
+    $('#volume').value = 1;
+    $('#volume').dispatchEvent(new Event('input'));
+    await sleep(3000); // the mock's unplayable tracks finish skipping
+    dbl($$('.row')[0]);
+    await waitFor(() => $('#np-title').textContent === 'Dial-Up Lullaby' && seconds() >= 2, 'a real track playing', 20000);
+    $('#viz-toggle').click();
+    await check(() => floatStatus('Visualizer').includes('Live audio'), 'the visualizer hears the real audio', 10000);
+    const brightPixels = () => {
+      const canvas = $('.viz-canvas');
+      const { data } = canvas.getContext('2d').getImageData(0, 0, canvas.width, canvas.height);
+      let bright = 0;
+      for (let i = 0; i < data.length; i += 4) if (data[i] + data[i + 1] + data[i + 2] > 200) bright += 1;
+      return bright;
+    };
+    // Lit green LEDs, not the white peak caps, and they have to change.
+    const greens = () => {
+      const canvas = $('.viz-canvas');
+      const { data } = canvas.getContext('2d').getImageData(0, 0, canvas.width, canvas.height);
+      const lit = [];
+      for (let i = 0; i < data.length; i += 4) if (data[i] === 0 && data[i + 1] === 255 && data[i + 2] === 0) lit.push(i);
+      return lit;
+    };
+    await check(() => greens().length > 200, 'bars rise with the music', 15000);
+    await log(`CPU-WINDOW-START`);
+    const litBefore = greens().join();
+    await sleep(600);
+    await check(() => greens().join() !== litBefore, 'bars move with the music', 3000);
+    await log('SHOT visualizer');
+    await sleep(6000);
+    await log(`CPU-WINDOW-END`);
+    for (const mode of ['Oscilloscope', 'Mystify', 'Starfield', 'Spectrum']) {
+      await floatMenu('Mode', mode);
+      await check(() => floatStatus('Visualizer').startsWith(mode) && brightPixels() > 0, `${mode} draws`, 6000);
+      await log(`SHOT viz-${mode}`);
+      await sleep(1000);
+    }
+    $('#volume').value = 0;
+    $('#volume').dispatchEvent(new Event('input'));
+    $('#viz-toggle').click();
+
+    // The track page, reached from a row, without leaving the app.
+    const titleOf = (i) => $$('.row')[i].querySelector('.title');
+    const secondTitle = titleOf(1);
+    secondTitle.click();
+    await check(() => $('.hero-kind')?.textContent === 'Track' && byText('.hero-title', 'Blue Screen Sunrise'), 'clicking a title opens its track page');
+    await check(() => $('.wave-canvas') && byText('.prop-value', 'Ambient') && byText('.description', 'Recorded on a 486'), 'track page shows waveform and details');
+    await log('SHOT track-page');
+    await sleep(1500);
+    await clickText('.tab', 'Lyrics');
+    await check(() => byText('.lyric-line', 'Word timed 0'), 'track page shows lyrics', 15000);
+    await clickText('.tab', 'Related Tracks');
+    await check(() => $$('.row').length === 10, 'track page shows related tracks');
+    $('#nav-back').click(); $('#nav-back').click(); $('#nav-back').click();
+    await waitFor(() => $$('.row').length > 40, 'list after back');
+    const first = titleOf(0);
+    first.click(); first.click(); dbl(first);
+    await sleep(500);
+    await check(() => $('.hero-kind') === null && $('#np-title').textContent === 'Dial-Up Lullaby', 'double clicking a title plays instead of opening');
+    $('#np-art').click();
+    await check(() => byText('.hero-title', 'Dial-Up Lullaby'), 'clicking the player artwork opens the track page');
+    $('#nav-back').click();
+    await waitFor(() => $$('.row').length > 40, 'list after back');
+    $$('.row')[1].querySelector('.row-art').click();
+    await check(() => byText('.hero-title', 'Blue Screen Sunrise'), 'clicking row artwork opens the track page');
+    $('#nav-back').click();
+    await waitFor(() => $$('.row').length > 40, 'list after back');
+
+    const seen = await invoke('api_get', { target: '/__log' });
+    const elsewhere = seen.filter((r) => /^\/(lrclib|netease|genius|wave)/.test(r.path));
+    await check(() => elsewhere.length && elsewhere.every((r) => !r.auth), 'the session never reaches lyrics or waveform hosts');
 
     const row = $$('.row')[4];
     row.querySelector('.heart').click();
@@ -149,7 +269,7 @@
     await check(() => byText('.hero-title', 'Late Shift') && $$('.row').length === 12, 'playlist page');
     await clickText('.tree-item', 'Liked Tracks');
     await check(() => byText('.hero-title', 'Liked Tracks'), 'liked tracks page');
-    (await waitFor(() => $('.row button.link'), 'artist link')).click();
+    (await waitFor(() => $('.row button.artist'), 'artist link')).click();
     await check(() => $('.hero-kind')?.textContent === 'Artist', 'artist page');
     const follow = await waitFor(() => {
       const b = byText('.hero-actions button', 'Follow') || byText('.hero-actions button', 'Unfollow');
