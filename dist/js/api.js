@@ -1,0 +1,143 @@
+// Bridge to the Rust backend, which holds the session and talks to SoundCloud.
+// Everything here speaks api-v2, the API SoundCloud's website uses, because that's
+// the one a website login is good for. Views only see the normalised shapes.
+
+const invoke = (...args) => window.__TAURI__.core.invoke(...args);
+const PAGE = 50;
+const MAX_IDS = 5000;
+const PLAYLIST_TRACKS = 'playlist-tracks:';
+const ACCESS = { BLOCK: 'blocked', SNIP: 'preview' };
+
+let me = null;
+export const setMe = (user) => { me = user?.id ?? null; };
+
+/** The numeric ID on the end of a URN, which is what api-v2 paths take. */
+export const idOf = (urn) => String(urn).split(':').pop();
+
+const urnOf = (kind, raw) => raw.urn || `soundcloud:${kind}:${raw.id}`;
+
+export const trackUrn = (id) => `soundcloud:tracks:${id}`;
+
+export function url(path, params = {}) {
+  const query = new URLSearchParams(
+    Object.entries(params).filter(([, v]) => v != null).map(([k, v]) => [k, String(v)]),
+  );
+  return query.size ? `${path}?${query}` : path;
+}
+
+export const api = {
+  status: () => invoke('status'),
+  login: () => invoke('login'),
+  cancelLogin: () => invoke('cancel_login'),
+  logout: () => invoke('logout'),
+  get: (target) => invoke('api_get', { target }),
+  send: (method, path, body = null) => invoke('api_send', { method, path, body }),
+  open: (link) => invoke('open_link', { url: link }),
+  audioStatus: () => invoke('audio_status'),
+  audioInstall: () => invoke('audio_install'),
+  relaunch: () => invoke('relaunch'),
+};
+
+export function normalizeTrack(raw) {
+  // Likes and play history wrap the track.
+  const track = raw?.track || raw;
+  if (!track) return null;
+  return {
+    kind: 'track',
+    urn: urnOf('tracks', track),
+    title: track.title || 'Untitled',
+    artist: track.publisher_metadata?.artist || track.user?.username || 'Unknown artist',
+    uploader: track.user?.username || '',
+    userUrn: track.user?.urn || null,
+    duration: track.duration || 0,
+    plays: track.playback_count ?? null,
+    artwork: track.artwork_url || track.user?.avatar_url || '',
+    link: track.permalink_url || '',
+    access: track.access || ACCESS[track.policy] || 'playable',
+  };
+}
+
+export function normalizePlaylist(raw) {
+  const playlist = raw.playlist || raw;
+  return {
+    kind: 'playlist',
+    urn: urnOf('playlists', playlist),
+    title: playlist.title || 'Untitled',
+    owner: playlist.user?.username || '',
+    ownerUrn: playlist.user?.urn || null,
+    count: playlist.track_count ?? null,
+    artwork: playlist.artwork_url || playlist.user?.avatar_url || '',
+    link: playlist.permalink_url || '',
+    duration: playlist.duration || 0,
+  };
+}
+
+export function normalizeUser(raw) {
+  return {
+    kind: 'user',
+    urn: urnOf('users', raw),
+    name: raw.username || 'Unknown',
+    avatar: raw.avatar_url || '',
+    followers: raw.followers_count ?? null,
+    tracks: raw.track_count ?? null,
+    city: raw.city || '',
+    link: raw.permalink_url || '',
+  };
+}
+
+export function bigArt(src) {
+  return src ? src.replace('-large.', '-t300x300.') : '';
+}
+
+/** api-v2 only fills in a playlist's first few tracks, so the rest come by ID. */
+async function playlistPage(target) {
+  const [id, from] = target.slice(PLAYLIST_TRACKS.length).split(':');
+  const start = Number(from);
+  const end = start + PAGE;
+  const ids = (await api.get(paths.playlist(id))).tracks.map((t) => t.id);
+  const wanted = ids.slice(start, end);
+  const tracks = wanted.length ? await api.get(url('/tracks', { ids: wanted.join(',') })) : [];
+  const byId = new Map(tracks.map((t) => [t.id, t]));
+  return {
+    collection: wanted.map((i) => byId.get(i)).filter(Boolean),
+    next_href: end < ids.length ? `${PLAYLIST_TRACKS}${id}:${end}` : null,
+  };
+}
+
+/** Page of a linked-partitioning collection, normalised. */
+export async function page(target, normalize) {
+  const data = target.startsWith(PLAYLIST_TRACKS) ? await playlistPage(target) : await api.get(target);
+  const items = Array.isArray(data) ? data : data?.collection || [];
+  return { items: items.map(normalize).filter(Boolean), next: data?.next_href || null };
+}
+
+const paged = (path, params = {}) => url(path, { limit: PAGE, linked_partitioning: true, ...params });
+
+export const paths = {
+  feed: () => paged('/stream'),
+  recent: () => paged('/me/play-history/tracks'),
+  likes: (limit = PAGE) => paged(`/users/${me}/track_likes`, { limit }),
+  likeIds: () => url('/me/track_likes/ids', { limit: MAX_IDS }),
+  like: (urn) => `/users/${me}/track_likes/${idOf(urn)}`,
+  myPlaylists: () => paged(`/users/${me}/playlists_without_albums`),
+  followings: () => paged(`/users/${me}/followings`),
+  followingIds: () => url(`/users/${me}/followings/ids`, { limit: MAX_IDS }),
+  follow: (urn) => `/me/followings/${idOf(urn)}`,
+  searchTracks: (q) => paged('/search/tracks', { q }),
+  // The filter only matches lowercase genres, and needs q to be present.
+  genre: (genre) => paged('/search/tracks', { q: '', 'filter.genre_or_tag': genre.toLowerCase() }),
+  searchPlaylists: (q) => paged('/search/playlists', { q }),
+  searchUsers: (q) => paged('/search/users', { q }),
+  playlist: (urn) => `/playlists/${idOf(urn)}`,
+  playlistTracks: (urn) => `${PLAYLIST_TRACKS}${idOf(urn)}:0`,
+  user: (urn) => `/users/${idOf(urn)}`,
+  userTracks: (urn) => paged(`/users/${idOf(urn)}/tracks`),
+  userPlaylists: (urn) => paged(`/users/${idOf(urn)}/playlists_without_albums`),
+  userLikes: (urn) => paged(`/users/${idOf(urn)}/track_likes`),
+  related: (urn) => paged(`/tracks/${idOf(urn)}/related`),
+};
+
+/** Feed entries hold a `track` or a `playlist`. Only tracks are listed. */
+export function normalizeFeedItem(item) {
+  return item?.track ? normalizeTrack(item.track) : null;
+}

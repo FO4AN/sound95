@@ -3,66 +3,101 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>SoundScape</title>
+<title>Sound95</title>
 <link rel="stylesheet" href="win95.css">
+<link rel="stylesheet" href="app.css">
 </head>
 <body>
-  <div id="desktop">
-    <div id="window">
-      <div id="titlebar">
-        <span id="title">SoundScape</span>
-        <span id="tb-buttons">
-          <button id="tb-min" title="Minimize">&#8211;</button>
-          <button id="tb-max" title="Maximize">&#9633;</button>
-          <button id="tb-close" title="Close">&#10005;</button>
+  <div id="app">
+    <div class="window" id="main-window">
+      <div class="titlebar" id="titlebar">
+        <span class="titlebar-icon" id="title-icon"></span>
+        <span class="titlebar-text" id="title-text" data-tauri-drag-region>Sound95</span>
+        <span class="titlebar-buttons">
+          <button class="caption" id="win-min" aria-label="Minimize"></button>
+          <button class="caption" id="win-max" aria-label="Maximize"></button>
+          <button class="caption" id="win-close" aria-label="Close"></button>
         </span>
       </div>
-      <div id="menubar">
-        <span class="mi">File</span><span class="mi">Edit</span><span class="mi">View</span><span class="mi">Help</span>
+      <div class="menubar" id="menubar"></div>
+
+      <div class="toolbar">
+        <button class="tool" id="nav-back" aria-label="Back" title="Back"></button>
+        <button class="tool" id="nav-forward" aria-label="Forward" title="Forward"></button>
+        <button class="tool" id="nav-home" aria-label="Home" title="Home"></button>
+        <span class="tool-sep"></span>
+        <label class="address">
+          <span>Search:</span>
+          <input id="search-box" type="text" spellcheck="false" autocomplete="off" placeholder="Tracks, playlists, people">
+        </label>
+        <button id="search-go">Go</button>
+        <span class="tool-sep"></span>
+        <button class="account" id="account-button"></button>
       </div>
-      <div id="toolbar">
-        <button id="btn-back" title="Back">&#9664; &#9654;</button>
-        <button id="btn-fwd" title="Forward">&#9654; &#9664;</button>
-        <button id="btn-refresh" title="Refresh">&#10227;</button>
-        <input id="search" type="text" placeholder="Search SoundCloud..." spellcheck="false">
-        <button id="btn-search">&#128269; Search</button>
-        <button id="btn-play" title="Play">&#9654; Play</button>
-        <button id="btn-stop" title="Stop">&#9632; Stop</button>
-      </div>
-      <div id="main">
-        <div id="tracklist">
-          <div id="tracklist-empty">No tracks loaded. Search for something!</div>
+
+      <div class="workspace" id="workspace">
+        <div class="left">
+          <nav class="sidebar sunken" id="sidebar" aria-label="Library"></nav>
+          <div class="widget-slot" id="widget-slot"></div>
         </div>
-        <div id="nowplaying">
-          <div id="artwrap"><img id="artwork" src="" alt="artwork"></div>
-          <div id="np-title">Nothing playing</div>
-          <div id="np-artist">—</div>
-          <div id="np-controls">
-            <button id="np-playpause">&#9654;</button>
-            <button id="np-stop">&#9632;</button>
-            <button id="np-prev">&#171; Prev</button>
-            <button id="np-next">&#Next; Next</button>
-            <input id="volume" type="range" min="0" max="1" step="0.01" value="1">
+        <main class="content sunken" id="content"></main>
+        <aside class="queue" id="queue-panel" aria-label="Up next">
+          <div class="pane-head">
+            <span>Up Next</span>
+            <button id="queue-clear">Clear</button>
           </div>
-          <div id="progressrow">
-            <div id="progress"><div id="progress-fill"></div></div>
-            <span id="time-cur">0:00</span>
-            <span id="time-total">-0:00</span>
-            <input id="seek" type="range" min="0" max="0" step="0.1" value="0">
+          <div class="queue-list sunken" id="queue-list"></div>
+        </aside>
+      </div>
+
+      <div class="playerbar" id="playerbar">
+        <div class="np">
+          <span class="np-art sunken" id="np-art"></span>
+          <div class="np-text">
+            <button class="link np-title" id="np-title" disabled>Nothing playing</button>
+            <button class="link np-artist" id="np-artist" disabled></button>
+          </div>
+          <button class="tool" id="np-like" aria-label="Like" title="Like" disabled></button>
+        </div>
+        <div class="transport">
+          <div class="transport-buttons">
+            <button class="tool toggle" id="tp-shuffle" aria-label="Shuffle" title="Shuffle"></button>
+            <button class="tool" id="tp-prev" aria-label="Previous" title="Previous"></button>
+            <button class="tool tool-play" id="tp-play" aria-label="Play" title="Play"></button>
+            <button class="tool" id="tp-next" aria-label="Next" title="Next"></button>
+            <button class="tool toggle" id="tp-repeat" aria-label="Repeat" title="Repeat"></button>
+          </div>
+          <div class="seek-row">
+            <span class="time" id="time-now">0:00</span>
+            <input type="range" class="slider" id="seek" min="0" max="1000" value="0" step="1" aria-label="Seek" disabled>
+            <span class="time" id="time-total">0:00</span>
           </div>
         </div>
+        <div class="np-right">
+          <button class="tool toggle" id="queue-toggle" aria-label="Up Next" title="Up Next"></button>
+          <span class="vol-icon" id="vol-icon"></span>
+          <input type="range" class="slider" id="volume" min="0" max="100" value="80" aria-label="Volume">
+        </div>
       </div>
-      <div id="statusbar">
-        <span id="status-msg">Ready.</span>
-        <span id="status-right">SoundScape v0.1</span>
+
+      <div class="statusbar">
+        <span class="status-cell grow" id="status">Ready</span>
+        <span class="status-cell" id="status-source">Streaming from SoundCloud</span>
       </div>
     </div>
+
+    <div class="taskbar">
+      <button class="start" id="start-button"><span id="start-icon"></span>Start</button>
+      <span class="task-sep"></span>
+      <button class="task pressed" id="task-button"></button>
+      <span class="tray sunken-thin">
+        <span id="tray-speaker"></span>
+        <span id="clock"></span>
+      </span>
+    </div>
   </div>
-  <div id="taskbar">
-    <button id="start">&#9600; Start</button>
-    <button id="task-app">&#9835; SoundScape</button>
-  </div>
-  <audio id="audio" preload="none"></audio>
-  <script src="app.js"></script>
+  <div id="overlays"></div>
+  <script src="https://w.soundcloud.com/player/api.js"></script>
+  <script type="module" src="js/main.js"></script>
 </body>
 </html>
