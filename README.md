@@ -38,13 +38,16 @@ built into the app is refused.
 
 - **Track pages.** Click a track's name or picture for its page: waveform, details, lyrics
   and related tracks, all inside the app.
-- **Visualizer.** Spectrum, Oscilloscope, Mystify and Starfield, driven by the audio that's
-  actually playing. There's a small meter in the player bar too. Double click to fill the window.
+- **Visualizer.** Eleven modes: Spectrum, Oscilloscope, Mystify, Starfield, VU Meters, Waterfall,
+  Sunburst, Plasma, 3D Pipes, Flying Windows and Marquee, driven by the audio that's actually
+  playing. There's a small meter in the player bar too. Double click to fill the window.
 - **Karaoke.** Finds lyrics for whatever plays and wipes through them in time. `[` moves the
   words earlier and `]` later. If a song only has plain text, the timing is a guess, and **Tap to
   Sync** lets you fix it: press Space as each line starts and it's saved for that track.
   **Paste Lyrics** covers songs nobody has published words for.
 - **Any window size.** The layout folds down to fit a small window or a tiling tile.
+- **Settings.** File > Settings picks a light or dark theme and the language: English, Русский,
+  Українська, Español, Deutsch or Français.
 
 ## Build
 

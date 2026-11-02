@@ -143,6 +143,49 @@
     await log(`INFO ${floatStatus('Karaoke')}`);
     await check(() => $('.k-line.current') && sung(), 'karaoke wipes through the words', 15000);
     await log('SHOT karaoke');
+
+    // Dragging, with events shaped like a real pointer's.
+    const karaoke = () => $$('.float').find((w) => w.querySelector('.titlebar-text').textContent === 'Karaoke');
+    const titleBar = () => karaoke().querySelector('.titlebar');
+    const pointer = (type, x, y, buttons = 1) => new PointerEvent(type, { bubbles: true, pointerId: 1, button: 0, buttons, clientX: x, clientY: y });
+    const nextFrame = () => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done)));
+    const at = () => { const { left, top } = karaoke().getBoundingClientRect(); return [Math.round(left), Math.round(top)]; };
+    const drag = async (x, y, end) => {
+      const [left, top] = at();
+      titleBar().dispatchEvent(pointer('pointerdown', left + 40, top + 8));
+      for (let step = 1; step <= 5; step++) window.dispatchEvent(pointer('pointermove', left + 40 + (x * step) / 5, top + 8 + (y * step) / 5));
+      await nextFrame();
+      const moved = at();
+      const ok = moved[0] === left + x && moved[1] === top + y;
+      window.dispatchEvent(end);
+      await nextFrame();
+      return ok;
+    };
+    await check(() => drag(-30, 24, pointer('pointerup', 0, 0, 0)), 'the title bar drags the window, a frame later at most');
+    const released = at();
+    window.dispatchEvent(pointer('pointermove', released[0] + 90, released[1] + 90));
+    await nextFrame();
+    await check(() => at().join() === released.join(), 'letting go ends the drag');
+    await check(() => drag(12, -9, pointer('pointercancel', 0, 0, 0)), 'a drag follows the pointer until it is cancelled');
+    const cancelled = at();
+    window.dispatchEvent(pointer('pointermove', cancelled[0] + 90, cancelled[1] + 90));
+    await nextFrame();
+    await check(() => at().join() === cancelled.join(), 'a cancelled drag stops following');
+    // A release outside the window never arrives; the next move has no button held.
+    await check(() => drag(-5, 5, pointer('pointermove', 400, 400, 0)), 'a drag follows the pointer again');
+    const lost = at();
+    window.dispatchEvent(pointer('pointermove', lost[0] + 90, lost[1] + 90));
+    await nextFrame();
+    await check(() => at().join() === lost.join(), 'a lost release cannot leave the window stuck to the pointer');
+    const { width, height } = karaoke().getBoundingClientRect();
+    karaoke().querySelector('.grip').dispatchEvent(pointer('pointerdown', 500, 500));
+    window.dispatchEvent(pointer('pointermove', 520, 510));
+    await nextFrame();
+    window.dispatchEvent(pointer('pointerup', 520, 510, 0));
+    await check(() => {
+      const size = karaoke().getBoundingClientRect();
+      return Math.round(size.width - width) === 20 && Math.round(size.height - height) === 10;
+    }, 'the grip resizes by as much as the pointer moved');
     await sleep(1500);
     dbl($$('.row')[0]);
     await check(() => floatStatus('Karaoke').startsWith('LRCLIB - timed by line'), 'karaoke follows the next track, through a 503', 20000);
@@ -207,7 +250,7 @@
     await log('SHOT visualizer');
     await sleep(6000);
     await log(`CPU-WINDOW-END`);
-    for (const mode of ['Oscilloscope', 'Mystify', 'Starfield', 'Spectrum']) {
+    for (const mode of ['Oscilloscope', 'Mystify', 'Starfield', 'VU Meters', 'Waterfall', 'Sunburst', 'Plasma', '3D Pipes', 'Flying Windows', 'Marquee', 'Spectrum']) {
       await floatMenu('Mode', mode);
       await check(() => floatStatus('Visualizer').startsWith(mode) && brightPixels() > 0, `${mode} draws`, 6000);
       await log(`SHOT viz-${mode}`);
@@ -263,6 +306,47 @@
     await check(() => byText('.dialog .titlebar-text', 'About'), 'about dialog from the Help menu');
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
     await check(() => !$('.dialog'), 'Esc closes dialogs');
+
+    // Theme and language, put back afterwards.
+    const theme = () => document.documentElement.dataset.theme;
+    const openSettings = async (file, item) => {
+      byText('#menubar .menu-title', file).dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+      await clickText('.menu-item', item);
+      await waitFor(() => $('.settings'), 'the settings window');
+    };
+    const choose = (radio, language) => {
+      $$('.settings input')[radio].click();
+      const box = $('.settings select');
+      box.value = language;
+      box.dispatchEvent(new Event('change', { bubbles: true }));
+    };
+    await openSettings('File', 'Settings');
+    await check(() => theme() === 'light' && $$('.settings input')[0].checked, 'the light theme is the default');
+    choose(1, 'ru');
+    await check(() => $('.monitor.dark'), 'the monitor previews the theme');
+    await log('SHOT settings');
+    await sleep(1000);
+    await clickText('.dialog button', 'Cancel');
+    await check(() => theme() === 'light' && byText('#menubar .menu-title', 'File'), 'Cancel changes nothing');
+    $('#karaoke-toggle').click();
+    await waitFor(() => $('.float'), 'the karaoke window');
+    await openSettings('File', 'Settings');
+    choose(1, 'ru');
+    await clickText('.dialog button', 'OK');
+    await check(() => theme() === 'dark' && getComputedStyle(document.body).color === 'rgb(230, 230, 230)', 'the dark theme applies');
+    await check(() => $('#menubar .menu-title').textContent === 'Файл' && $('#queue-clear').textContent !== 'Clear' && $('#search-box').placeholder !== 'Tracks, playlists, people', 'the menus and page change language');
+    await check(() => $('.float .titlebar-text').textContent !== 'Karaoke', 'open windows change language');
+    await check(() => localStorage.getItem('sound95.language') === 'ru' && localStorage.getItem('sound95.theme') === 'dark', 'the choices are remembered');
+    await log('SHOT dark');
+    await sleep(1000);
+    await openSettings('Файл', 'Настройка');
+    await check(() => $('.settings select').value === 'ru' && $$('.settings input')[1].checked, 'settings show the current choices');
+    choose(0, 'en');
+    await clickText('.dialog button', 'OK');
+    await check(() => theme() === 'light' && byText('#menubar .menu-title', 'File') && $('.float .titlebar-text').textContent === 'Karaoke', 'theme and language go back');
+    $('#karaoke-toggle').click();
+    await waitFor(() => !$('.float'), 'the karaoke window to close');
+
     $('#start-button').dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
     await check(() => $('.start-menu') && byText('.start-menu .menu-item', 'Log Off'), 'start menu');
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));

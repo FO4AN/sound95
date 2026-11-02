@@ -2,6 +2,7 @@
 // and sends frequency bands; where it can't (no PipeWire), bars follow the track's
 // published loudness instead and the status bar says so.
 
+import { tr } from './i18n.js';
 import { api, paths } from './api.js';
 import { el, errorText, setStatus } from './dom.js';
 import { showMenu } from './dialogs.js';
@@ -252,11 +253,208 @@ function drawStars(ctx, w, h, memory) {
   }
 }
 
+/* Black through blue, red and yellow to white, for how loud a band is. */
+const HEAT = Array.from({ length: 48 }, (_, i) => {
+  const v = i / 47;
+  const channel = (from, span) => Math.round(255 * Math.min(1, Math.max(0, (v - from) / span)));
+  return `rgb(${channel(0.2, 0.3)},${channel(0.5, 0.3)},${Math.max(channel(0, 0.25) - channel(0.25, 0.25), channel(0.8, 0.2))})`;
+});
+const heat = (v) => HEAT[Math.min(HEAT.length - 1, Math.floor(v * HEAT.length))];
+
+function average(from, to) {
+  let sum = 0;
+  for (let i = from; i < to; i++) sum += audio.bands[i];
+  return sum / (to - from);
+}
+
+function drawMeters(ctx, w, h, memory) {
+  clearTo(ctx, w, h, '#202020');
+  memory.needles ||= [0, 0];
+  const gap = 4;
+  const width = Math.floor((w - gap * 3) / 2);
+  const height = h - gap * 2;
+  [average(0, BANDS / 2), average(BANDS / 2, BANDS)].forEach((level, i) => {
+    memory.needles[i] += (Math.min(1, level * 1.3) - memory.needles[i]) * 0.35;
+    const left = gap + i * (width + gap);
+    ctx.fillStyle = '#ffffe1';
+    ctx.fillRect(left, gap, width, height);
+    const cx = left + width / 2;
+    const cy = gap + height * 0.92;
+    const radius = Math.min(width * 0.46, height * 0.8);
+    const point = (at, reach) => {
+      const angle = Math.PI * (-0.75 + at * 0.5);
+      return [cx + Math.cos(angle) * reach, cy + Math.sin(angle) * reach];
+    };
+    for (let tick = 0; tick <= 20; tick++) {
+      ctx.fillStyle = tick >= 15 ? '#ff0000' : '#000000';
+      line(ctx, ...point(tick / 20, radius), ...point(tick / 20, radius - (tick % 5 ? 2 : 5)));
+    }
+    ctx.fillStyle = '#800000';
+    line(ctx, cx, cy, ...point(memory.needles[i], radius - 1));
+    ctx.fillStyle = '#000000';
+    ctx.fillRect(cx - 3, cy - 3, 7, 7);
+  });
+}
+
+function drawWaterfall(ctx, w, h, memory) {
+  if (!memory.started) { clearTo(ctx, w, h); memory.started = true; }
+  ctx.drawImage(ctx.canvas, 0, -1);
+  const cell = Math.ceil(w / BANDS);
+  for (let band = 0; band < BANDS; band++) {
+    ctx.fillStyle = heat(audio.bands[band]);
+    ctx.fillRect(Math.floor((band / BANDS) * w), h - 1, cell, 1);
+  }
+}
+
+function drawSunburst(ctx, w, h, memory) {
+  clearTo(ctx, w, h);
+  memory.spin = (memory.spin || 0) + 0.004 + bass() * 0.05;
+  const cx = w / 2;
+  const cy = h / 2;
+  const radius = Math.min(w, h) / 2 - 2;
+  const inner = radius * (0.16 + bass() * 0.14);
+  const spokes = BANDS * 2;
+  for (let i = 0; i < spokes; i++) {
+    const value = audio.bands[i < BANDS ? i : spokes - 1 - i];
+    const angle = memory.spin + (i / spokes) * Math.PI * 2;
+    const reach = inner + value * (radius - inner);
+    ctx.fillStyle = heat(0.35 + value * 0.65);
+    line(ctx, cx + Math.cos(angle) * inner, cy + Math.sin(angle) * inner, cx + Math.cos(angle) * reach, cy + Math.sin(angle) * reach);
+  }
+}
+
+const PLASMA = Array.from({ length: 64 }, (_, i) => {
+  const wave = (shift) => Math.round(127 + 127 * Math.sin((i / 64) * Math.PI * 2 + shift));
+  return `rgb(${wave(0)},${wave(2.1)},${wave(4.2)})`;
+});
+
+function drawPlasma(ctx, w, h, memory) {
+  memory.time = (memory.time || 0) + 0.015 + audio.level * 0.09;
+  const time = memory.time;
+  const size = Math.max(3, Math.ceil(w / 90));
+  for (let y = 0; y < h; y += size) {
+    for (let x = 0; x < w; x += size) {
+      const value = Math.sin(x * 0.04 + time) + Math.sin(y * 0.06 - time * 1.3)
+        + Math.sin((x + y) * 0.03 + time * 0.7) + Math.sin(Math.hypot(x - w / 2, y - h / 2) * 0.05 - time * 1.7);
+      ctx.fillStyle = PLASMA[Math.floor(((value + 4) / 8) * 63 + time * 6) % 64];
+      ctx.fillRect(x, y, size, size);
+    }
+  }
+}
+
+const DIRECTIONS = [[1, 0], [0, 1], [-1, 0], [0, -1]];
+const PIPE_COLORS = [['#800000', '#ff0000'], ['#008000', '#00ff00'], ['#000080', '#0000ff'], ['#808000', '#ffff00'], ['#008080', '#00ffff'], ['#800080', '#ff00ff']];
+
+function newPipe(columns, rows) {
+  return {
+    x: Math.floor(Math.random() * columns),
+    y: Math.floor(Math.random() * rows),
+    direction: Math.floor(Math.random() * 4),
+    colors: PIPE_COLORS[Math.floor(Math.random() * PIPE_COLORS.length)],
+  };
+}
+
+function drawPipes(ctx, w, h, memory) {
+  const cell = Math.max(8, Math.floor(Math.min(w, h) / 12));
+  const columns = Math.floor(w / cell);
+  const rows = Math.floor(h / cell);
+  if (!memory.pipe || memory.drawn > columns * rows * 1.5) {
+    clearTo(ctx, w, h);
+    memory.pipe = newPipe(columns, rows);
+    memory.drawn = 0;
+    memory.owed = 0;
+  }
+  const width = Math.max(3, Math.floor(cell * 0.55));
+  const center = (n) => Math.floor(n * cell + cell / 2);
+  memory.owed += 0.12 + audio.level * 0.9;
+  for (; memory.owed >= 1; memory.owed -= 1) {
+    const pipe = memory.pipe;
+    if (Math.random() < 0.3) pipe.direction = (pipe.direction + (Math.random() < 0.5 ? 1 : 3)) % 4;
+    const [dx, dy] = DIRECTIONS[pipe.direction];
+    const x = pipe.x + dx;
+    const y = pipe.y + dy;
+    if (x < 0 || y < 0 || x >= columns || y >= rows) { memory.pipe = newPipe(columns, rows); continue; }
+    const left = Math.min(center(pipe.x), center(x)) - (width >> 1);
+    const top = Math.min(center(pipe.y), center(y)) - (width >> 1);
+    const across = dx ? cell + width : width;
+    const down = dy ? cell + width : width;
+    ctx.fillStyle = pipe.colors[0];
+    ctx.fillRect(left, top, across, down);
+    ctx.fillStyle = pipe.colors[1];
+    if (dx) ctx.fillRect(left, top + 1, across, Math.max(1, width >> 2));
+    else ctx.fillRect(left + 1, top, Math.max(1, width >> 2), down);
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(center(x) - 1, center(y) - 1, 2, 2);
+    pipe.x = x;
+    pipe.y = y;
+    memory.drawn += 1;
+  }
+}
+
+const FLAG = ['#ff0000', '#00c000', '#0000ff', '#ffff00'];
+
+function drawFlags(ctx, w, h, memory) {
+  memory.flags ||= Array.from({ length: 12 }, () => ({ x: Math.random() * 2 - 1, y: Math.random() * 2 - 1, z: Math.random() }));
+  memory.time = (memory.time || 0) + 0.15;
+  clearTo(ctx, w, h);
+  const speed = 0.004 + bass() * bass() * 0.03;
+  memory.flags.sort((a, b) => b.z - a.z);
+  for (const flag of memory.flags) {
+    flag.z -= speed;
+    if (flag.z <= 0.05) {
+      flag.x = Math.random() * 2 - 1;
+      flag.y = Math.random() * 2 - 1;
+      flag.z = 1;
+    }
+    const size = Math.max(4, Math.round((Math.min(w, h) * 0.07) / flag.z));
+    const x = w / 2 + (flag.x / flag.z) * (w / 2) - size / 2;
+    const y = h / 2 + (flag.y / flag.z) * (h / 2) - size / 2;
+    const columns = 8;
+    const width = Math.ceil(size / columns);
+    for (let c = 0; c < columns; c++) {
+      const sway = Math.round(Math.sin(c * 0.9 + memory.time + flag.x * 9) * size * 0.07);
+      const half = c < columns / 2 ? 0 : 1;
+      const cx = Math.round(x + (c / columns) * size + half);
+      ctx.fillStyle = FLAG[half];
+      ctx.fillRect(cx, Math.round(y) + sway, width, Math.floor(size * 0.47));
+      ctx.fillStyle = FLAG[half + 2];
+      ctx.fillRect(cx, Math.round(y + size * 0.53) + sway, width, Math.floor(size * 0.47));
+    }
+  }
+}
+
+function drawMarquee(ctx, w, h, memory) {
+  clearTo(ctx, w, h, '#000080');
+  const text = player.current ? `${player.current.artist} - ${player.current.title}` : 'Sound95';
+  const size = Math.max(10, Math.floor(h * 0.34));
+  ctx.font = `700 ${size}px "Pixelated MS Sans Serif", Tahoma, Arial, sans-serif`;
+  ctx.textBaseline = 'middle';
+  memory.x ??= w;
+  memory.time = (memory.time || 0) + 0.06;
+  memory.x -= 1 + audio.level * 5;
+  const width = ctx.measureText(text).width;
+  if (memory.x < -width) memory.x = w;
+  if (bass() - (memory.lastBass || 0) > 0.14) memory.color = ((memory.color || 0) + 1) % VGA.length;
+  memory.lastBass = bass();
+  const y = h / 2 + Math.sin(memory.time) * h * 0.14 - bass() * h * 0.12;
+  ctx.fillStyle = '#000000';
+  ctx.fillText(text, Math.round(memory.x) + 3, Math.round(y) + 3);
+  ctx.fillStyle = VGA[memory.color || 0];
+  ctx.fillText(text, Math.round(memory.x), Math.round(y));
+}
+
 export const MODES = {
   bars: { label: 'Spectrum', draw: drawBars },
   scope: { label: 'Oscilloscope', draw: drawScope },
   mystify: { label: 'Mystify', draw: drawMystify },
   stars: { label: 'Starfield', draw: drawStars },
+  meters: { label: 'VU Meters', draw: drawMeters },
+  waterfall: { label: 'Waterfall', draw: drawWaterfall },
+  sunburst: { label: 'Sunburst', draw: drawSunburst },
+  plasma: { label: 'Plasma', draw: drawPlasma },
+  pipes: { label: '3D Pipes', draw: drawPipes },
+  flags: { label: 'Flying Windows', draw: drawFlags },
+  marquee: { label: 'Marquee', draw: drawMarquee },
 };
 
 function frame(now) {
@@ -315,7 +513,7 @@ export function toggleVisualizer() {
   const canvas = el('canvas', { class: 'viz-canvas' });
   const surface = attachVisual(canvas, { mode: savedMode(), pixel: PIXEL });
   const modeItems = () => Object.entries(MODES).map(([id, { label }]) => ({
-    label,
+    label: tr(label),
     checked: surface.mode === id,
     action: () => {
       surface.mode = id;
@@ -327,7 +525,7 @@ export function toggleVisualizer() {
   let timer = null;
   win = floatWindow({
     id: 'visualizer',
-    title: 'Visualizer',
+    title: tr('Visualizer'),
     iconName: 'bars',
     width: 440,
     height: 300,
@@ -344,8 +542,8 @@ export function toggleVisualizer() {
   win.setBody(canvas);
   function describe() {
     if (!win) return;
-    const source = !player.playing ? 'Waiting for music' : usable() ? 'Live audio' : 'Track loudness only';
-    win.setStatus(`${MODES[surface.mode].label} - ${source}`);
+    const source = !player.playing ? tr('Waiting for music') : usable() ? tr('Live audio') : tr('Track loudness only');
+    win.setStatus(`${tr(MODES[surface.mode].label)} - ${source}`);
   }
   describe();
   timer = setInterval(describe, 500);

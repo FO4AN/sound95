@@ -1,5 +1,6 @@
 // Who is logged in, plus the likes and playlists that many views need.
 
+import { tr } from './i18n.js';
 import { api, normalizePlaylist, page, paths, setMe, trackUrn } from './api.js';
 import { errorText, setStatus } from './dom.js';
 
@@ -46,7 +47,7 @@ export function isLiked(track) {
 
 export async function toggleLike(track) {
   if (!session.user) {
-    setStatus('Log in to like tracks.');
+    setStatus(tr('Log in to like tracks.'));
     return;
   }
   const was = isLiked(track);
@@ -58,7 +59,7 @@ export async function toggleLike(track) {
   apply(!was);
   try {
     await api.send(was ? 'DELETE' : 'PUT', paths.like(track.urn));
-    setStatus(was ? `Removed "${track.title}" from Liked Tracks` : `Added "${track.title}" to Liked Tracks`);
+    setStatus(was ? tr('Removed "{title}" from Liked Tracks', { title: track.title }) : tr('Added "{title}" to Liked Tracks', { title: track.title }));
   } catch (e) {
     apply(was);
     setStatus(errorText(e));

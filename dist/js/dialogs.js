@@ -1,5 +1,6 @@
 // Modal Win95 dialogs, plus the menus they share chrome with.
 
+import { tr } from './i18n.js';
 import { el, clear, errorText } from './dom.js';
 import { icon } from './icons.js';
 import { api } from './api.js';
@@ -7,7 +8,7 @@ import { api } from './api.js';
 const overlays = () => document.getElementById('overlays');
 
 function chrome(title, { onClose } = {}) {
-  const closeButton = el('button', { class: 'caption', ariaLabel: 'Close', onClick: onClose }, icon('close'));
+  const closeButton = el('button', { class: 'caption', ariaLabel: tr('Close'), onClick: onClose }, icon('close'));
   return el('div', { class: 'titlebar' },
     el('span', { class: 'titlebar-text' }, title),
     el('span', { class: 'titlebar-buttons' }, closeButton));
@@ -48,18 +49,18 @@ export function message(title, text, { kind = 'info', extra } = {}) {
     body: el('div', { class: 'dialog-row' },
       el('span', { class: 'dialog-icon' }, icon(kind)),
       el('div', {}, el('p', {}, text), extra)),
-    buttons: [el('button', { class: 'default', onClick: () => close() }, 'OK')],
+    buttons: [el('button', { class: 'default', onClick: () => close() }, tr('OK'))],
   }));
 }
 
-export function prompt(title, label, { placeholder = '', okText = 'OK' } = {}) {
+export function prompt(title, label, { placeholder = '', okText = tr('OK') } = {}) {
   return dialog(title, (close) => {
     const input = el('input', { type: 'text', placeholder, spellcheck: false });
     return {
       body: el('div', { class: 'field' }, el('label', {}, label), input),
       buttons: [
         el('button', { class: 'default', onClick: () => close(input.value.trim() || undefined) }, okText),
-        el('button', { onClick: () => close() }, 'Cancel'),
+        el('button', { onClick: () => close() }, tr('Cancel')),
       ],
     };
   });
@@ -67,7 +68,7 @@ export function prompt(title, label, { placeholder = '', okText = 'OK' } = {}) {
 
 /** Resolves 'logged-on', or 'cancelled'. */
 export function logonDialog() {
-  return dialog('Log In to SoundCloud', (close) => {
+  return dialog(tr('Log In to SoundCloud'), (close) => {
     const body = el('div', { class: 'dialog-row' });
     const footer = [];
 
@@ -75,7 +76,7 @@ export function logonDialog() {
       clear(body,
         el('span', { class: 'dialog-icon' }, icon('keys')),
         el('div', { style: 'display:grid;gap:10px' },
-          el('p', {}, 'Sign in to SoundCloud in the window that just opened.'),
+          el('p', {}, tr('Sign in to SoundCloud in the window that just opened.')),
           el('div', { class: 'marquee sunken' })));
       footer.forEach((b) => { if (b !== cancel) b.disabled = true; });
       waiting = true;
@@ -94,8 +95,8 @@ export function logonDialog() {
       clear(body,
         el('span', { class: 'dialog-icon' }, icon('keys')),
         el('div', { style: 'display:grid;gap:8px' },
-          el('p', {}, 'Log in with your SoundCloud account. Your likes, playlists and follows come with you.'),
-          el('p', {}, 'New to SoundCloud? Choose New Account and sign up for free on its site.'),
+          el('p', {}, tr('Log in with your SoundCloud account. Your likes, playlists and follows come with you.')),
+          el('p', {}, tr('New to SoundCloud? Choose New Account and sign up for free on its site.')),
           note ? el('p', { class: 'tiny' }, note) : null));
     };
 
@@ -104,9 +105,9 @@ export function logonDialog() {
       if (waiting) { api.cancelLogin(); waiting = false; idle(); return; }
       close('cancelled');
     };
-    const logOn = el('button', { class: 'default', onClick: start }, 'Log In');
-    const create = el('button', { onClick: start }, 'New Account');
-    const cancel = el('button', { onClick: dismiss }, 'Cancel');
+    const logOn = el('button', { class: 'default', onClick: start }, tr('Log In'));
+    const create = el('button', { onClick: start }, tr('New Account'));
+    const cancel = el('button', { onClick: dismiss }, tr('Cancel'));
     footer.push(logOn, create, cancel);
     idle();
     return { body, buttons: footer, onDismiss: dismiss };
@@ -115,13 +116,13 @@ export function logonDialog() {
 
 /** Resolves true if you want the plug-ins, which is what opens a password prompt. */
 export function audioAskDialog() {
-  return dialog('Audio Plug-ins Needed', (close) => ({
+  return dialog(tr('Audio Plug-ins Needed'), (close) => ({
     body: el('div', { class: 'dialog-row' },
       el('span', { class: 'dialog-icon' }, icon('speaker')),
-      el('p', {}, 'Sound95 needs a few audio plug-ins to play music. Installing them asks for your password.')),
+      el('p', {}, tr('Sound95 needs a few audio plug-ins to play music. Installing them asks for your password.'))),
     buttons: [
-      el('button', { class: 'default', onClick: () => close(true) }, 'Install'),
-      el('button', { onClick: () => close(false) }, 'Not Now'),
+      el('button', { class: 'default', onClick: () => close(true) }, tr('Install')),
+      el('button', { onClick: () => close(false) }, tr('Not Now')),
     ],
     onDismiss: () => close(false),
   }));
@@ -129,13 +130,13 @@ export function audioAskDialog() {
 
 /** Installs the audio plug-ins. */
 export function audioSetupDialog() {
-  return dialog('Setting Up Audio', (close) => {
+  return dialog(tr('Setting Up Audio'), (close) => {
     api.audioInstall().then(() => close({ ok: true }), (error) => close({ ok: false, error }));
     return {
       body: el('div', { class: 'dialog-row' },
         el('span', { class: 'dialog-icon' }, icon('speaker')),
         el('div', { style: 'display:grid;gap:10px' },
-          el('p', {}, 'Sound95 is installing the audio plug-ins it needs. Enter your password when your system asks. Sound95 will restart when this finishes.'),
+          el('p', {}, tr('Sound95 is installing the audio plug-ins it needs. Enter your password when your system asks. Sound95 will restart when this finishes.')),
           el('div', { class: 'marquee sunken' }))),
       onDismiss: () => {},
     };
@@ -144,16 +145,16 @@ export function audioSetupDialog() {
 
 export async function aboutDialog() {
   const version = await api.version();
-  return dialog('About Sound95', (close) => ({
+  return dialog(tr('About Sound95'), (close) => ({
     body: el('div', { class: 'dialog-row' },
       el('span', { class: 'about-art' }, icon('note')),
       el('div', { style: 'display:grid;gap:6px' },
-        el('p', {}, el('b', {}, 'Sound95'), ` version ${version}`),
-        el('p', {}, 'A Windows 95 style client for SoundCloud.'),
-        el('p', { class: 'tiny' }, 'All music streams from SoundCloud and belongs to its uploaders. Sound95 is not affiliated with SoundCloud or Microsoft. Nothing is saved for offline use.'),
-        el('p', { class: 'tiny' }, 'Lyrics come from LRCLIB, NetEase and Genius, and belong to their writers.'),
-        el('p', { class: 'tiny' }, 'Pixel font from 98.css (MIT).'))),
-    buttons: [el('button', { class: 'default', onClick: () => close() }, 'OK')],
+        el('p', {}, el('b', {}, 'Sound95'), ` ${tr('version {version}', { version })}`),
+        el('p', {}, tr('A Windows 95 style client for SoundCloud.')),
+        el('p', { class: 'tiny' }, tr('All music streams from SoundCloud and belongs to its uploaders. Sound95 is not affiliated with SoundCloud or Microsoft. Nothing is saved for offline use.')),
+        el('p', { class: 'tiny' }, tr('Lyrics come from LRCLIB, NetEase and Genius, and belong to their writers.')),
+        el('p', { class: 'tiny' }, tr('Pixel font from 98.css (MIT).')))),
+    buttons: [el('button', { class: 'default', onClick: () => close() }, tr('OK'))],
   }), { width: 360 });
 }
 

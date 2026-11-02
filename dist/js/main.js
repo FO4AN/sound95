@@ -1,5 +1,7 @@
 // App shell: wires the window chrome, menus, player bar and session together.
 
+import { onLanguageChange, tr, translatePage } from './i18n.js';
+import { applyTheme, settingsDialog } from './settings.js';
 import { api } from './api.js';
 import { clear, el, errorText, fmtTime, setStatus } from './dom.js';
 import { icon, setIcon } from './icons.js';
@@ -54,7 +56,7 @@ async function logOn() {
   if (result !== 'logged-on') return;
   try {
     await loadSession();
-    setStatus(`Logged in as ${session.user?.username}`);
+    setStatus(tr('Logged in as {name}', { name: session.user?.username }));
   } catch (e) {
     setStatus(errorText(e));
   }
@@ -65,47 +67,51 @@ window.addEventListener('sound95:logon', logOn);
 async function logOff() {
   await api.logout();
   await loadSession();
-  setStatus('Logged off');
+  setStatus(tr('Logged off'));
   go({ name: 'home' });
 }
 
 /* ---------- Menus ---------- */
 
+const repeatLabel = () => tr('Repeat: {mode}', { mode: tr({ off: 'Off', all: 'All', one: 'One' }[player.repeat]) });
+
 function menuDefinitions() {
   const route = currentRoute();
   return {
     File: [
-      { label: 'New Playlist...', disabled: !session.user, action: createPlaylist },
+      { label: tr('New Playlist...'), disabled: !session.user, action: createPlaylist },
+      'sep',
+      { label: tr('Settings...'), action: settingsDialog },
       'sep',
       session.user
-        ? { label: `Log Off ${session.user.username}...`, action: logOff }
-        : { label: 'Log In...', action: logOn },
+        ? { label: tr('Log Off {name}...', { name: session.user.username }), action: logOff }
+        : { label: tr('Log In...'), action: logOn },
       'sep',
-      { label: 'Exit', action: () => appWindow().close() },
+      { label: tr('Exit'), action: () => appWindow().close() },
     ],
     View: [
-      { label: 'Home', checked: route?.name === 'home', action: () => go({ name: 'home' }) },
-      { label: 'Discover', checked: route?.name === 'discover', action: () => go({ name: 'discover' }) },
-      { label: 'Liked Tracks', checked: route?.name === 'liked', action: () => go({ name: 'liked' }) },
-      { label: 'Following', checked: route?.name === 'following', action: () => go({ name: 'following' }) },
+      { label: tr('Home'), checked: route?.name === 'home', action: () => go({ name: 'home' }) },
+      { label: tr('Discover'), checked: route?.name === 'discover', action: () => go({ name: 'discover' }) },
+      { label: tr('Liked Tracks'), checked: route?.name === 'liked', action: () => go({ name: 'liked' }) },
+      { label: tr('Following'), checked: route?.name === 'following', action: () => go({ name: 'following' }) },
       'sep',
-      { label: 'Up Next', checked: !$('workspace').classList.contains('no-queue'), action: toggleQueue },
-      { label: 'Visualizer', checked: visualizerOpen(), action: toggleVisualizer },
-      { label: 'Karaoke', checked: karaokeOpen(), action: toggleKaraoke },
-      { label: 'Refresh', accel: 'F5', action: refresh },
+      { label: tr('Up Next'), checked: !$('workspace').classList.contains('no-queue'), action: toggleQueue },
+      { label: tr('Visualizer'), checked: visualizerOpen(), action: toggleVisualizer },
+      { label: tr('Karaoke'), checked: karaokeOpen(), action: toggleKaraoke },
+      { label: tr('Refresh'), accel: 'F5', action: refresh },
     ],
     Playback: [
-      { label: player.playing ? 'Pause' : 'Play', accel: 'Space', disabled: !player.current, action: togglePlay },
-      { label: 'Next', accel: 'Ctrl+Right', disabled: !player.current, action: () => next() },
-      { label: 'Previous', accel: 'Ctrl+Left', disabled: !player.current, action: prev },
+      { label: player.playing ? tr('Pause') : tr('Play'), accel: 'Space', disabled: !player.current, action: togglePlay },
+      { label: tr('Next'), accel: 'Ctrl+Right', disabled: !player.current, action: () => next() },
+      { label: tr('Previous'), accel: 'Ctrl+Left', disabled: !player.current, action: prev },
       'sep',
-      { label: 'Shuffle', checked: player.shuffle, action: toggleShuffle },
-      { label: `Repeat: ${{ off: 'Off', all: 'All', one: 'One' }[player.repeat]}`, action: cycleRepeat },
+      { label: tr('Shuffle'), checked: player.shuffle, action: toggleShuffle },
+      { label: repeatLabel(), action: cycleRepeat },
     ],
     Help: [
-      { label: 'Check for Updates...', action: checkForUpdates },
+      { label: tr('Check for Updates...'), action: checkForUpdates },
       'sep',
-      { label: 'About Sound95', action: aboutDialog },
+      { label: tr('About Sound95'), action: aboutDialog },
     ],
   };
 }
@@ -116,21 +122,24 @@ function openBarMenu(title, node) {
   showMenu(menuDefinitions()[title], rect.left, rect.bottom, { onClose: () => node.classList.remove('open') });
 }
 
-for (const title of ['File', 'View', 'Playback', 'Help']) {
-  const node = el('div', {
-    class: 'menu-title',
-    onMousedown: (e) => {
-      e.stopPropagation();
-      if (node.classList.contains('open')) closeMenu();
-      else openBarMenu(title, node);
-    },
-    onMouseenter: () => {
-      const other = document.querySelector('.menu-title.open');
-      if (other && other !== node) openBarMenu(title, node);
-    },
-  }, title);
-  $('menubar').append(node);
+function renderMenubar() {
+  clear($('menubar'), ['File', 'View', 'Playback', 'Help'].map((title) => {
+    const node = el('div', {
+      class: 'menu-title',
+      onMousedown: (e) => {
+        e.stopPropagation();
+        if (node.classList.contains('open')) closeMenu();
+        else openBarMenu(title, node);
+      },
+      onMouseenter: () => {
+        const other = document.querySelector('.menu-title.open');
+        if (other && other !== node) openBarMenu(title, node);
+      },
+    }, tr(title));
+    return node;
+  }));
 }
+renderMenubar();
 
 function openStartMenu() {
   const button = $('start-button');
@@ -138,17 +147,18 @@ function openStartMenu() {
   button.classList.add('pressed');
   const rect = button.getBoundingClientRect();
   const items = [
-    { label: 'Home', icon: 'home', action: () => go({ name: 'home' }) },
-    { label: 'Discover', icon: 'search', action: () => go({ name: 'discover' }) },
-    { label: 'Liked Tracks', icon: 'heart-on', action: () => go({ name: 'liked' }) },
-    { label: 'Following', icon: 'users', action: () => go({ name: 'following' }) },
-    { label: 'Visualizer', icon: 'bars', action: toggleVisualizer },
-    { label: 'Karaoke', icon: 'mic', action: toggleKaraoke },
+    { label: tr('Home'), icon: 'home', action: () => go({ name: 'home' }) },
+    { label: tr('Discover'), icon: 'search', action: () => go({ name: 'discover' }) },
+    { label: tr('Liked Tracks'), icon: 'heart-on', action: () => go({ name: 'liked' }) },
+    { label: tr('Following'), icon: 'users', action: () => go({ name: 'following' }) },
+    { label: tr('Visualizer'), icon: 'bars', action: toggleVisualizer },
+    { label: tr('Karaoke'), icon: 'mic', action: toggleKaraoke },
+    { label: tr('Settings...'), icon: 'gear', action: settingsDialog },
     'sep',
     session.user
-      ? { label: `Log Off ${session.user.username}...`, icon: 'user', action: logOff }
-      : { label: 'Log In...', icon: 'user', action: logOn },
-    { label: 'Shut Down', icon: 'close', action: () => appWindow().close() },
+      ? { label: tr('Log Off {name}...', { name: session.user.username }), icon: 'user', action: logOff }
+      : { label: tr('Log In...'), icon: 'user', action: logOn },
+    { label: tr('Shut Down'), icon: 'close', action: () => appWindow().close() },
   ];
   showMenu(items, rect.left, 0, {
     below: rect.top,
@@ -176,18 +186,18 @@ function treeItem(iconName, label, route) {
 function renderSidebar() {
   clear($('sidebar'),
     el('div', { class: 'tree-head' }, icon('note'), 'Sound95'),
-    treeItem('home', 'Home', { name: 'home' }),
-    treeItem('note', 'Discover', { name: 'discover' }),
-    treeItem('search', 'Search', { name: 'search', q: $('search-box').value.trim() }),
-    el('div', { class: 'tree-head' }, icon('folder'), 'My Library'),
+    treeItem('home', tr('Home'), { name: 'home' }),
+    treeItem('note', tr('Discover'), { name: 'discover' }),
+    treeItem('search', tr('Search'), { name: 'search', q: $('search-box').value.trim() }),
+    el('div', { class: 'tree-head' }, icon('folder'), tr('My Library')),
     session.user ? [
-      treeItem('heart-on', 'Liked Tracks', { name: 'liked' }),
-      treeItem('clock', 'Recently Played', { name: 'recent' }),
-      treeItem('users', 'Following', { name: 'following' }),
-    ] : el('div', { class: 'tree-empty' }, 'Log in to see this'),
-    el('div', { class: 'tree-head' }, icon('folder'), 'Playlists'),
+      treeItem('heart-on', tr('Liked Tracks'), { name: 'liked' }),
+      treeItem('clock', tr('Recently Played'), { name: 'recent' }),
+      treeItem('users', tr('Following'), { name: 'following' }),
+    ] : el('div', { class: 'tree-empty' }, tr('Log in to see this')),
+    el('div', { class: 'tree-head' }, icon('folder'), tr('Playlists')),
     session.user ? [
-      el('div', { class: 'tree-item', onClick: createPlaylist }, icon('plus'), el('span', {}, 'New Playlist...')),
+      el('div', { class: 'tree-item', onClick: createPlaylist }, icon('plus'), el('span', {}, tr('New Playlist...'))),
       session.playlists.map((p) => treeItem('playlist', p.title, { name: 'playlist', urn: p.urn })),
     ] : null);
 }
@@ -198,10 +208,10 @@ function renderAccount() {
     clear(button,
       session.user.avatar_url ? el('img', { class: 'avatar', src: session.user.avatar_url, alt: '' }) : icon('user'),
       el('span', {}, session.user.username));
-    button.title = 'Account';
+    button.title = tr('Account');
   } else {
-    clear(button, icon('keys'), el('span', {}, 'Log In...'));
-    button.title = 'Log in to SoundCloud';
+    clear(button, icon('keys'), el('span', {}, tr('Log In...')));
+    button.title = tr('Log in to SoundCloud');
   }
 }
 
@@ -209,10 +219,10 @@ $('account-button').addEventListener('click', (e) => {
   if (!session.user) return logOn();
   const rect = e.currentTarget.getBoundingClientRect();
   showMenu([
-    { label: 'Open Profile', action: () => go({ name: 'user', urn: session.user.urn }) },
-    { label: 'Open on SoundCloud', disabled: !session.user.permalink_url, action: () => api.open(session.user.permalink_url) },
+    { label: tr('Open Profile'), action: () => go({ name: 'user', urn: session.user.urn }) },
+    { label: tr('Open on SoundCloud'), disabled: !session.user.permalink_url, action: () => api.open(session.user.permalink_url) },
     'sep',
-    { label: 'Log Off', action: logOff },
+    { label: tr('Log Off'), action: logOff },
   ], rect.left, rect.bottom);
   return undefined;
 });
@@ -225,18 +235,18 @@ function renderPlayer() {
   const track = player.current;
   const playing = player.playing;
   setIcon($('tp-play'), playing ? 'pause' : 'play');
-  $('tp-play').setAttribute('aria-label', playing ? 'Pause' : 'Play');
+  $('tp-play').setAttribute('aria-label', playing ? tr('Pause') : tr('Play'));
   for (const id of ['tp-play', 'tp-next', 'tp-prev']) $(id).disabled = !track;
   $('seek').disabled = !track;
   $('tp-shuffle').classList.toggle('on', player.shuffle);
   $('tp-repeat').classList.toggle('on', player.repeat !== 'off');
   setIcon($('tp-repeat'), player.repeat === 'one' ? 'repeat-one' : 'repeat');
-  $('tp-repeat').title = `Repeat: ${player.repeat}`;
-  $('np-title').textContent = track ? track.title : 'Nothing playing';
+  $('tp-repeat').title = repeatLabel();
+  $('np-title').textContent = track ? track.title : tr('Nothing playing');
   $('np-title').disabled = !track;
-  $('np-title').title = track ? 'Open track page' : '';
-  $('np-art').title = track ? 'Open track page' : '';
-  $('np-artist').textContent = track ? `${track.artist}${player.preview ? ' (preview)' : ''}` : '';
+  $('np-title').title = track ? tr('Open track page') : '';
+  $('np-art').title = track ? tr('Open track page') : '';
+  $('np-artist').textContent = track ? `${track.artist}${player.preview ? tr(' (preview)') : ''}` : '';
   $('np-artist').disabled = !track?.userUrn;
   $('np-like').disabled = !track || !session.user;
   setIcon($('np-like'), isLiked(track) ? 'heart-on' : 'heart');
@@ -265,7 +275,7 @@ function renderTime() {
 function renderQueue() {
   const list = $('queue-list');
   if (!player.queue.length) {
-    clear(list, el('div', { class: 'tree-empty', style: 'padding:6px' }, 'Nothing queued.'));
+    clear(list, el('div', { class: 'tree-empty', style: 'padding:6px' }, tr('Nothing queued.')));
     return;
   }
   clear(list, player.queue.map((t, i) => el('div', {
@@ -273,7 +283,7 @@ function renderQueue() {
     title: `${t.artist} - ${t.title}`,
     onDblclick: () => jumpTo(i),
   },
-  el('button', { class: 'link q-art', title: 'Open track page', onClick: () => openTrack(t, player.queue, i) },
+  el('button', { class: 'link q-art', title: tr('Open track page'), onClick: () => openTrack(t, player.queue, i) },
     t.artwork ? el('img', { src: t.artwork, alt: '', loading: 'lazy' }) : el('span', { class: 'q-blank' }, icon('note'))),
   el('div', { class: 'q-text' }, el('div', {}, t.title), el('div', { class: 'q-artist' }, t.artist)))));
 }
@@ -380,10 +390,10 @@ async function ensureAudio() {
   const audioState = await api.audioStatus();
   if (audioState.ready) localStorage.removeItem(AUDIO_TRIED);
   if (audioState.ready) return;
-  const showCommand = () => message('Sound95', 'Sound95 could not install the audio plug-ins it needs.', {
+  const showCommand = () => message('Sound95', tr('Sound95 could not install the audio plug-ins it needs.'), {
     kind: 'warn',
     extra: audioState.command ? el('div', { style: 'margin-top:8px;display:grid;gap:4px' },
-      el('p', {}, 'To install them yourself, run:'),
+      el('p', {}, tr('To install them yourself, run:')),
       el('div', { class: 'selectable' }, audioState.command)) : null,
   });
   // Installing didn't help last time, so asking for the password again would only loop.
@@ -392,7 +402,7 @@ async function ensureAudio() {
     return;
   }
   if (!await audioAskDialog()) {
-    setStatus('Audio plug-ins were not installed, so tracks will not play.', { sticky: true });
+    setStatus(tr('Audio plug-ins were not installed, so tracks will not play.'), { sticky: true });
     return;
   }
   const result = await audioSetupDialog();
@@ -400,7 +410,7 @@ async function ensureAudio() {
     localStorage.setItem(AUDIO_TRIED, '1');
     await api.relaunch();
   } else if (result.error?.code === 'audio_declined') {
-    setStatus('Audio plug-ins were not installed, so tracks will not play.', { sticky: true });
+    setStatus(tr('Audio plug-ins were not installed, so tracks will not play.'), { sticky: true });
   } else {
     await message('Sound95', errorText(result.error), { kind: 'warn' });
     await showCommand();
@@ -409,7 +419,21 @@ async function ensureAudio() {
 
 /* ---------- Boot ---------- */
 
+// Windows and open pages are built in one language, so they get rebuilt in the new one.
+onLanguageChange(() => {
+  renderMenubar();
+  renderSidebar();
+  renderAccount();
+  renderPlayer();
+  refresh();
+  for (const [open, toggle] of [[visualizerOpen, toggleVisualizer], [karaokeOpen, toggleKaraoke]]) {
+    if (open()) { toggle(); toggle(); }
+  }
+});
+
 async function boot() {
+  applyTheme();
+  translatePage();
   const savedQueue = localStorage.getItem('sound95.queue');
   const narrow = window.matchMedia('(max-width: 1000px)').matches;
   if (savedQueue === '0' || (narrow && savedQueue === null)) $('workspace').classList.add('no-queue');

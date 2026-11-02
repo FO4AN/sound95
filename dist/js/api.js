@@ -2,6 +2,8 @@
 // Everything here speaks api-v2, the API SoundCloud's website uses, because that's
 // the one a website login is good for. Views only see the normalised shapes.
 
+import { tr } from './i18n.js';
+
 const invoke = (...args) => window.__TAURI__.core.invoke(...args);
 const PAGE = 50;
 const MAX_IDS = 5000;
@@ -52,8 +54,8 @@ export function normalizeTrack(raw) {
   return {
     kind: 'track',
     urn: urnOf('tracks', track),
-    title: track.title || 'Untitled',
-    artist: track.publisher_metadata?.artist || track.user?.username || 'Unknown artist',
+    title: track.title || tr('Untitled'),
+    artist: track.publisher_metadata?.artist || track.user?.username || tr('Unknown artist'),
     uploader: track.user?.username || '',
     userUrn: track.user?.urn || null,
     duration: track.duration || 0,
@@ -86,7 +88,7 @@ export function normalizePlaylist(raw) {
   return {
     kind: 'playlist',
     urn: urnOf('playlists', playlist),
-    title: playlist.title || 'Untitled',
+    title: playlist.title || tr('Untitled'),
     owner: playlist.user?.username || '',
     ownerUrn: playlist.user?.urn || null,
     count: playlist.track_count ?? null,
@@ -100,7 +102,7 @@ export function normalizeUser(raw) {
   return {
     kind: 'user',
     urn: urnOf('users', raw),
-    name: raw.username || 'Unknown',
+    name: raw.username || tr('Unknown'),
     avatar: raw.avatar_url || '',
     followers: raw.followers_count ?? null,
     tracks: raw.track_count ?? null,

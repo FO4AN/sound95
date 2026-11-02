@@ -1,5 +1,7 @@
 // Tiny DOM builder. Everything from SoundCloud goes in as text, never as HTML.
 
+import { tr } from './i18n.js';
+
 export function el(tag, props = {}, ...children) {
   const node = document.createElement(tag);
   for (const [key, value] of Object.entries(props)) {
@@ -52,12 +54,12 @@ export function setStatus(text, { sticky = false } = {}) {
   const node = document.getElementById('status');
   node.textContent = text;
   clearTimeout(statusTimer);
-  if (!sticky) statusTimer = setTimeout(() => { node.textContent = 'Ready'; }, 6000);
+  if (!sticky) statusTimer = setTimeout(() => { node.textContent = tr('Ready'); }, 6000);
 }
 
 export function errorText(e) {
   if (e?.code === 'rate_limited') {
-    return e.retry_after ? `SoundCloud rate limit reached. Try again in ${e.retry_after}s.` : e.message;
+    return e.retry_after ? tr('SoundCloud rate limit reached. Try again in {seconds}s.', { seconds: e.retry_after }) : e.message;
   }
   return e?.message || String(e);
 }

@@ -1,6 +1,7 @@
 // A track's waveform, styled after the Sound Recorder's display. SoundCloud
 // publishes the loudness of every track, so this works before anything plays.
 
+import { tr } from './i18n.js';
 import { el, whileShown } from './dom.js';
 import { durationMs, onPlayerChange, onProgress, player, positionMs, seekTo } from './player.js';
 import { api } from './api.js';
@@ -27,7 +28,7 @@ export function loudness(link) {
 
 export function waveformView(track, { onPlay }) {
   const canvas = el('canvas', { class: 'wave-canvas' });
-  const frame = el('div', { class: 'wave sunken', title: 'Click to jump here' }, canvas);
+  const frame = el('div', { class: 'wave sunken', title: tr('Click to jump here') }, canvas);
   let samples = null;
   let hover = null;
 

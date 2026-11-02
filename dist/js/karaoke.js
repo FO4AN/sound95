@@ -2,6 +2,7 @@
 // the music. Timed lyrics are used when anyone has them; otherwise the words are laid
 // out over the track as a guess, and Tap to Sync lets you time them properly.
 
+import { tr } from './i18n.js';
 import { api } from './api.js';
 import { clear, el, errorText, fmtTime } from './dom.js';
 import { dialog } from './dialogs.js';
@@ -155,12 +156,12 @@ function describe() {
   const { win, lyrics, offset } = state;
   if (!win) return;
   if (!lyrics) { win.setStatus(''); return; }
-  const timing = lyrics.custom ? 'your timing' : lyrics.byWord ? 'timed word by word' : lyrics.synced ? 'timed by line' : 'estimated timing, try Tap to Sync';
-  const parts = [lyrics.source, timing];
-  if (lyrics.speedAdjusted) parts.push('adjusted to this speed');
-  else if (lyrics.synced && Math.abs(lyrics.offBy) > 4) parts.push(`from a version ${Math.abs(lyrics.offBy)}s ${lyrics.offBy > 0 ? 'longer' : 'shorter'}`);
+  const timing = lyrics.custom ? tr('your timing') : lyrics.byWord ? tr('timed word by word') : lyrics.synced ? tr('timed by line') : tr('estimated timing, try Tap to Sync');
+  const parts = [tr(lyrics.source), timing];
+  if (lyrics.speedAdjusted) parts.push(tr('adjusted to this speed'));
+  else if (lyrics.synced && Math.abs(lyrics.offBy) > 4) parts.push(tr(lyrics.offBy > 0 ? 'from a version {seconds}s longer' : 'from a version {seconds}s shorter', { seconds: Math.abs(lyrics.offBy) }));
   if (offset) parts.push(`${offset > 0 ? '+' : ''}${(offset / 1000).toFixed(2)}s`);
-  if (outputDelayMs() >= 30) parts.push(`${outputDelayMs()} ms speaker delay fixed`);
+  if (outputDelayMs() >= 30) parts.push(tr('{ms} ms speaker delay fixed', { ms: outputDelayMs() }));
   win.setStatus(parts.join(' - '));
 }
 
@@ -179,8 +180,8 @@ function use(lyrics) {
   describe();
 }
 
-const findButton = () => el('button', { onClick: findDialog }, 'Find Lyrics...');
-const pasteButton = () => el('button', { onClick: pasteDialog }, 'Paste Lyrics...');
+const findButton = () => el('button', { onClick: findDialog }, tr('Find Lyrics...'));
+const pasteButton = () => el('button', { onClick: pasteDialog }, tr('Paste Lyrics...'));
 
 async function load(track, retried = false) {
   const token = ++state.token;
@@ -189,27 +190,27 @@ async function load(track, retried = false) {
   state.lyrics = null;
   state.cues = [];
   state.tap = null;
-  if (!track) { showNotice('Play a track to sing along.'); return; }
+  if (!track) { showNotice(tr('Play a track to sing along.')); return; }
   const remembered = saved(track.urn);
   state.offset = remembered.offset || 0;
   if (remembered.custom) {
     use(remembered.custom);
     return;
   }
-  clear(linesBox, el('div', { class: 'k-notice' }, el('div', {}, 'Searching for lyrics...'), el('div', { class: 'marquee sunken' })));
+  clear(linesBox, el('div', { class: 'k-notice' }, el('div', {}, tr('Searching for lyrics...')), el('div', { class: 'marquee sunken' })));
   try {
     const results = await lyricsFor(track);
     if (token !== state.token) return;
     state.results = results;
     if (results.length) use(results[0]);
-    else showNotice('No lyrics found for this track.', findButton(), pasteButton());
+    else showNotice(tr('No lyrics found for this track.'), findButton(), pasteButton());
   } catch (e) {
     if (token !== state.token) return;
     if (!retried) {
       setTimeout(() => { if (token === state.token) load(track, true); }, RETRY_MS);
       return;
     }
-    showNotice(errorText(e), el('button', { onClick: () => load(track) }, 'Retry'), pasteButton());
+    showNotice(errorText(e), el('button', { onClick: () => load(track) }, tr('Retry')), pasteButton());
   }
 }
 
@@ -304,10 +305,10 @@ function showTapLine() {
     el('div', { class: 'k-line current k-tap' }, lines[index]?.text),
     el('div', { class: 'k-line next' }, lines[index + 1]?.text || ''),
     el('div', { class: 'k-notice' },
-      el('div', {}, `Press Space as each line starts. ${index + 1} of ${lines.length}`),
+      el('div', {}, tr('Press Space as each line starts. {done} of {total}', { done: index + 1, total: lines.length })),
       el('div', { class: 'k-buttons' },
-        el('button', { onClick: tap }, 'Tap'),
-        el('button', { onClick: stopTapping }, 'Cancel'))));
+        el('button', { onClick: tap }, tr('Tap')),
+        el('button', { onClick: stopTapping }, tr('Cancel')))));
 }
 
 function tap() {
@@ -345,8 +346,8 @@ function onKey(e) {
 /* ---------- Dialogs ---------- */
 
 function kindOf(lyrics) {
-  if (lyrics.byWord) return 'Word timed';
-  return lyrics.synced ? 'Line timed' : 'Text only';
+  if (lyrics.byWord) return tr('Word timed');
+  return lyrics.synced ? tr('Line timed') : tr('Text only');
 }
 
 function resultRow(lyrics, close) {
@@ -354,21 +355,21 @@ function resultRow(lyrics, close) {
   return el('div', { class: 'menu-item pick', onClick: () => close(lyrics) },
     el('span', { class: 'pick-name', title: `${lyrics.artist} - ${lyrics.title}` }, `${lyrics.artist} - ${lyrics.title}`),
     el('span', {}, `${kindOf(lyrics)}${off}`),
-    el('span', {}, lyrics.source));
+    el('span', {}, tr(lyrics.source)));
 }
 
 async function findDialog() {
   const track = state.track;
   if (!track) return;
-  const chosen = await dialog('Find Lyrics', (close) => {
+  const chosen = await dialog(tr('Find Lyrics'), (close) => {
     const artist = el('input', { type: 'text', value: track.artist, spellcheck: false });
     const title = el('input', { type: 'text', value: track.title, spellcheck: false });
     const list = el('div', { class: 'pick-list sunken' });
     const search = async (request) => {
-      clear(list, el('div', { class: 'note', style: 'padding:4px' }, 'Searching...'));
+      clear(list, el('div', { class: 'note', style: 'padding:4px' }, tr('Searching...')));
       try {
         const results = await api.lyrics(request);
-        clear(list, results.length ? results.map((r) => resultRow(r, close)) : el('div', { class: 'note', style: 'padding:4px' }, 'Nothing found. Try a shorter title.'));
+        clear(list, results.length ? results.map((r) => resultRow(r, close)) : el('div', { class: 'note', style: 'padding:4px' }, tr('Nothing found. Try a shorter title.')));
       } catch (e) {
         clear(list, el('div', { class: 'note', style: 'padding:4px' }, errorText(e)));
       }
@@ -376,14 +377,14 @@ async function findDialog() {
     const button = el('button', {
       class: 'default',
       onClick: () => search({ ...requestFor(track), artist: artist.value, title: title.value, exact: true, everything: true }),
-    }, 'Search');
+    }, tr('Search'));
     search({ ...requestFor(track), everything: true });
     return {
       body: el('div', { style: 'display:grid;gap:6px' },
-        el('div', { class: 'field' }, el('label', {}, 'Artist:'), artist),
-        el('div', { class: 'field' }, el('label', {}, 'Title:'), title),
+        el('div', { class: 'field' }, el('label', {}, tr('Artist:')), artist),
+        el('div', { class: 'field' }, el('label', {}, tr('Title:')), title),
         list),
-      buttons: [button, el('button', { onClick: () => close() }, 'Cancel')],
+      buttons: [button, el('button', { onClick: () => close() }, tr('Cancel'))],
     };
   }, { width: 480 });
   if (chosen) {
@@ -395,13 +396,13 @@ async function findDialog() {
 async function pasteDialog() {
   const track = state.track;
   if (!track) return;
-  const text = await dialog('Paste Lyrics', (close) => {
-    const box = el('textarea', { class: 'paste', spellcheck: false, placeholder: 'One line per line. [mm:ss.xx] stamps are kept.' });
+  const text = await dialog(tr('Paste Lyrics'), (close) => {
+    const box = el('textarea', { class: 'paste', spellcheck: false, placeholder: tr('One line per line. [mm:ss.xx] stamps are kept.') });
     return {
       body: box,
       buttons: [
         el('button', { class: 'default', onClick: () => close(box.value) }, 'OK'),
-        el('button', { onClick: () => close() }, 'Cancel'),
+        el('button', { onClick: () => close() }, tr('Cancel')),
       ],
     };
   }, { width: 420 });
@@ -412,21 +413,21 @@ async function pasteDialog() {
 }
 
 const lyricsMenu = () => [
-  { label: 'Find Lyrics...', disabled: !state.track, action: findDialog },
-  { label: 'Paste Lyrics...', disabled: !state.track, action: pasteDialog },
+  { label: tr('Find Lyrics...'), disabled: !state.track, action: findDialog },
+  { label: tr('Paste Lyrics...'), disabled: !state.track, action: pasteDialog },
   'sep',
-  { label: 'Tap to Sync', disabled: !state.lyrics || !player.current, action: startTapping },
+  { label: tr('Tap to Sync'), disabled: !state.lyrics || !player.current, action: startTapping },
   {
-    label: 'Forget My Lyrics',
+    label: tr('Forget My Lyrics'),
     disabled: !state.track || !saved(state.track.urn).custom,
     action: () => { save(state.track.urn, { custom: null }); load(state.track); },
   },
 ];
 
 const timingMenu = () => [
-  { label: 'Words Earlier', accel: '[', action: () => nudge(-NUDGE_MS) },
-  { label: 'Words Later', accel: ']', action: () => nudge(NUDGE_MS) },
-  { label: 'Reset', disabled: !state.offset, action: () => nudge(0) },
+  { label: tr('Words Earlier'), accel: '[', action: () => nudge(-NUDGE_MS) },
+  { label: tr('Words Later'), accel: ']', action: () => nudge(NUDGE_MS) },
+  { label: tr('Reset'), disabled: !state.offset, action: () => nudge(0) },
 ];
 
 function applySize(name) {
@@ -435,9 +436,9 @@ function applySize(name) {
 }
 
 const viewMenu = () => [
-  ...Object.keys(SIZES).map((name) => ({ label: `${name} Text`, checked: sizeNow() === name, action: () => applySize(name) })),
+  ...Object.keys(SIZES).map((name) => ({ label: tr(`${name} Text`), checked: sizeNow() === name, action: () => applySize(name) })),
   'sep',
-  { label: 'Full Window', checked: state.win?.maximized, action: () => state.win.toggleMaximize() },
+  { label: tr('Full Window'), checked: state.win?.maximized, action: () => state.win.toggleMaximize() },
 ];
 
 /* ---------- Opening and closing ---------- */
@@ -447,7 +448,7 @@ export function toggleKaraoke() {
   let bars = null;
   state.win = floatWindow({
     id: 'karaoke',
-    title: 'Karaoke',
+    title: tr('Karaoke'),
     iconName: 'mic',
     width: 620,
     height: 400,

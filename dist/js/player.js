@@ -1,6 +1,7 @@
 // Queue and playback. Audio comes from SoundCloud's official Widget player,
 // which each listener streams from directly; the player bar drives it.
 
+import { tr } from './i18n.js';
 import { setStatus } from './dom.js';
 
 const STORE_KEY = 'sound95.player';
@@ -94,7 +95,7 @@ function started(mine) {
   player.loading = false;
   skips = 0;
   const track = player.current;
-  setStatus(`Now playing: ${track.artist} - ${track.title}`);
+  setStatus(tr('Now playing: {track}', { track: `${track.artist} - ${track.title}` }));
   widget.getDuration((ms) => { if (mine === generation && ms) duration = ms; });
   emit();
 }
@@ -105,11 +106,11 @@ function failed(track) {
   player.playing = false;
   if (skips < MAX_SKIPS && player.index < player.queue.length - 1) {
     skips += 1;
-    setStatus(`Could not play "${track.title}". Skipping.`);
+    setStatus(tr('Could not play "{title}". Skipping.', { title: track.title }));
     next();
     return;
   }
-  setStatus(`Could not play "${track.title}".`, { sticky: true });
+  setStatus(tr('Could not play "{title}".', { title: track.title }), { sticky: true });
   emit();
 }
 
@@ -161,7 +162,7 @@ function load(track) {
   setPosition(0);
   duration = track.duration || 0;
   emit();
-  setStatus(`Opening "${track.title}"...`, { sticky: true });
+  setStatus(tr('Opening "{title}"...', { title: track.title }), { sticky: true });
   clearTimeout(startTimer);
   startTimer = setTimeout(() => { if (mine === generation && player.loading) failed(track); }, START_TIMEOUT_MS);
   if (!widget) {
@@ -208,7 +209,7 @@ export function enqueue(track, { nextUp = false } = {}) {
     return;
   }
   player.queue.splice(nextUp ? player.index + 1 : player.queue.length, 0, track);
-  setStatus(`Added "${track.title}" to Up Next`);
+  setStatus(tr('Added "{title}" to Up Next', { title: track.title }));
   emit();
 }
 
@@ -241,7 +242,7 @@ export function next({ auto = false } = {}) {
   if (player.index < player.queue.length - 1) {
     player.index += 1;
   } else if (player.repeat === 'off' && auto) {
-    setStatus('End of queue');
+    setStatus(tr('End of queue'));
     emit();
     return;
   } else {

@@ -1,5 +1,6 @@
 // Main-pane views and the back/forward history.
 
+import { tr } from './i18n.js';
 import {
   api, bigArt, idOf, normalizeFeedItem, normalizePlaylist, normalizeTrack, normalizeUser, page, paths, smallArt,
   trackDetails,
@@ -39,7 +40,7 @@ async function render() {
   const route = currentRoute();
   navListeners.forEach((fn) => fn(route));
   content.scrollTop = 0;
-  clear(content, el('div', { class: 'view note' }, 'Loading...'));
+  clear(content, el('div', { class: 'view note' }, tr('Loading...')));
   rows.clear();
   try {
     const node = await VIEWS[route.name](route, () => token === renderToken);
@@ -56,7 +57,7 @@ function failure(e) {
   return el('div', { class: 'empty' },
     icon('warn'),
     el('div', {}, errorText(e)),
-    el('button', { onClick: refresh }, 'Retry'));
+    el('button', { onClick: refresh }, tr('Retry')));
 }
 
 function empty(text, iconName = 'note') {
@@ -79,18 +80,18 @@ export function syncRows() {
 function trackMenu(track, list, index, x, y) {
   const canUse = track.access !== 'blocked';
   const items = [
-    { label: 'Track Page', action: () => openTrack(track, list, index) },
+    { label: tr('Track Page'), action: () => openTrack(track, list, index) },
     'sep',
-    { label: 'Play', disabled: !canUse, action: () => playList(list, index) },
-    { label: 'Play Next', disabled: !canUse, action: () => enqueue(track, { nextUp: true }) },
-    { label: 'Add to Up Next', disabled: !canUse, action: () => enqueue(track) },
+    { label: tr('Play'), disabled: !canUse, action: () => playList(list, index) },
+    { label: tr('Play Next'), disabled: !canUse, action: () => enqueue(track, { nextUp: true }) },
+    { label: tr('Add to Up Next'), disabled: !canUse, action: () => enqueue(track) },
     'sep',
-    { label: isLiked(track) ? 'Remove from Liked Tracks' : 'Add to Liked Tracks', disabled: !session.user, action: () => toggleLike(track) },
-    { label: 'Add to Playlist...', disabled: !session.user, action: () => addToPlaylist(track) },
+    { label: isLiked(track) ? tr('Remove from Liked Tracks') : tr('Add to Liked Tracks'), disabled: !session.user, action: () => toggleLike(track) },
+    { label: tr('Add to Playlist...'), disabled: !session.user, action: () => addToPlaylist(track) },
     'sep',
-    { label: 'Tracks Like This', action: () => go({ name: 'related', track }) },
-    { label: 'Go to Uploader', disabled: !track.userUrn, action: () => go({ name: 'user', urn: track.userUrn }) },
-    { label: 'Open on SoundCloud', disabled: !track.link, action: () => api.open(track.link) },
+    { label: tr('Tracks Like This'), action: () => go({ name: 'related', track }) },
+    { label: tr('Go to Uploader'), disabled: !track.userUrn, action: () => go({ name: 'user', urn: track.userUrn }) },
+    { label: tr('Open on SoundCloud'), disabled: !track.link, action: () => api.open(track.link) },
   ];
   showMenu(items, x, y);
 }
@@ -128,12 +129,12 @@ function trackRow(track, list, index) {
   },
   num,
   heart,
-  el('button', { class: 'link row-art', title: 'Open track page', onClick: openSoon },
+  el('button', { class: 'link row-art', title: tr('Open track page'), onClick: openSoon },
     track.artwork ? el('img', { src: smallArt(track.artwork), alt: '', loading: 'lazy' }) : icon('note')),
   el('span', { class: 'title-wrap' },
     el('button', { class: 'link title', title: track.title, onClick: openSoon }, track.title),
-    track.access === 'preview' ? el('span', { class: 'badge' }, 'Preview') : null,
-    blocked ? el('span', { class: 'badge' }, 'Blocked') : null),
+    track.access === 'preview' ? el('span', { class: 'badge' }, tr('Preview')) : null,
+    blocked ? el('span', { class: 'badge' }, tr('Blocked')) : null),
   el('button', {
     class: 'link artist',
     disabled: !track.userUrn,
@@ -170,14 +171,14 @@ function trackList(first, load) {
           setStatus(errorText(err));
         }
       },
-    }, 'More...') : null);
+    }, tr('More...')) : null);
   };
   addMoreButton();
 
   const node = el('div', { class: 'list' },
     el('div', { class: 'list-head' },
-      el('span', { class: 'num' }, '#'), el('span', {}), el('span', {}), el('span', {}, 'Title'),
-      el('span', {}, 'Artist'), el('span', { class: 'plays' }, 'Plays'), el('span', { class: 'dur' }, 'Time')),
+      el('span', { class: 'num' }, '#'), el('span', {}), el('span', {}), el('span', {}, tr('Title')),
+      el('span', {}, tr('Artist')), el('span', { class: 'plays' }, tr('Plays')), el('span', { class: 'dur' }, tr('Time'))),
     body, more);
   return { node, tracks };
 }
@@ -193,7 +194,7 @@ const playlistTile = (p) => tile({
   art: bigArt(p.artwork),
   fallback: 'playlist',
   name: p.title,
-  sub: p.count != null ? `${p.count} tracks` : p.owner,
+  sub: p.count != null ? tr('{count} tracks', { count: p.count }) : p.owner,
   onOpen: () => go({ name: 'playlist', urn: p.urn }),
 });
 
@@ -201,7 +202,7 @@ const userTile = (u) => tile({
   art: bigArt(u.avatar),
   fallback: 'user',
   name: u.name,
-  sub: u.followers != null ? `${fmtCount(u.followers)} followers` : '',
+  sub: u.followers != null ? tr('{count} followers', { count: fmtCount(u.followers) }) : '',
   onOpen: () => go({ name: 'user', urn: u.urn }),
 });
 
@@ -218,7 +219,7 @@ function playButton(getTracks) {
   return el('button', {
     class: 'default',
     onClick: () => { const t = getTracks(); if (t.length) playList(t, 0); },
-  }, icon('play'), 'Play');
+  }, icon('play'), tr('Play'));
 }
 
 function tabs(items, selected, onSelect) {
@@ -235,30 +236,30 @@ async function pagedTrackView(target, normalize = normalizeTrack) {
 
 function logOnPrompt(text, iconName = 'keys') {
   return el('div', { class: 'empty' }, icon(iconName), el('div', {}, text),
-    el('button', { class: 'default', onClick: () => window.dispatchEvent(new Event('sound95:logon')) }, 'Log In...'));
+    el('button', { class: 'default', onClick: () => window.dispatchEvent(new Event('sound95:logon')) }, tr('Log In...')));
 }
 
 async function homeView(_route, alive) {
-  if (!session.user) return logOnPrompt('Log in to SoundCloud to start listening.');
+  if (!session.user) return logOnPrompt(tr('Log in to SoundCloud to start listening.'));
   const [feed, recent] = await Promise.allSettled([
     page(paths.feed(), normalizeFeedItem),
     page(paths.recent(), normalizeTrack),
   ]);
   if (!alive()) return el('div');
-  const root = el('div', { class: 'view' }, el('h1', { class: 'greeting' }, `Welcome back, ${session.user.username}`));
+  const root = el('div', { class: 'view' }, el('h1', { class: 'greeting' }, tr('Welcome back, {name}', { name: session.user.username })));
   if (session.playlists.length) {
-    root.append(el('div', { class: 'shelf-title' }, 'Your Playlists'),
+    root.append(el('div', { class: 'shelf-title' }, tr('Your Playlists')),
       el('div', { class: 'tiles' }, session.playlists.slice(0, 12).map(playlistTile)));
   }
   if (recent.status === 'fulfilled' && recent.value.items.length) {
-    root.append(el('div', { class: 'shelf-title' }, 'Recently Played'),
+    root.append(el('div', { class: 'shelf-title' }, tr('Recently Played')),
       trackList({ items: recent.value.items.slice(0, 8), next: null }, null).node);
   }
   if (feed.status === 'fulfilled' && feed.value.items.length) {
     const { node } = trackList(feed.value, (t) => page(t, normalizeFeedItem));
-    root.append(el('div', { class: 'shelf-title' }, 'New from People You Follow'), node);
+    root.append(el('div', { class: 'shelf-title' }, tr('New from People You Follow')), node);
   } else if (feed.status === 'rejected') {
-    root.append(el('div', { class: 'shelf-title' }, 'New from People You Follow'),
+    root.append(el('div', { class: 'shelf-title' }, tr('New from People You Follow')),
       el('div', { class: 'note' }, errorText(feed.reason)));
   }
   return root;
@@ -267,11 +268,11 @@ async function homeView(_route, alive) {
 const GENRES = ['Hip-hop & Rap', 'Electronic', 'House', 'Techno', 'Pop', 'R&B & Soul', 'Rock', 'Indie', 'Ambient', 'Drum & Bass', 'Dubstep', 'Trap', 'Lo-fi', 'Metal', 'Jazz & Blues', 'Latin', 'Classical', 'Soundtrack'];
 
 async function discoverView(_route, alive) {
-  if (!session.user) return logOnPrompt('Log in to discover music.', 'search');
+  if (!session.user) return logOnPrompt(tr('Log in to discover music.'), 'search');
   const root = el('div', { class: 'view' },
-    el('h1', { class: 'greeting' }, 'Discover'),
-    el('div', { class: 'shelf-title' }, 'Browse by Genre'),
-    el('div', { class: 'genres' }, GENRES.map((genre) => el('button', { onClick: () => go({ name: 'genre', genre }) }, genre))));
+    el('h1', { class: 'greeting' }, tr('Discover')),
+    el('div', { class: 'shelf-title' }, tr('Browse by Genre')),
+    el('div', { class: 'genres' }, GENRES.map((genre) => el('button', { onClick: () => go({ name: 'genre', genre }) }, tr(genre)))));
   // SoundCloud has no public recommendations feed, so this builds one from
   // what the user recently played, or failing that, liked.
   const [recent, likes] = await Promise.allSettled([page(paths.recent(), normalizeTrack), page(paths.likes(5), normalizeTrack)]);
@@ -281,7 +282,7 @@ async function discoverView(_route, alive) {
   if (seed) {
     const related = await page(paths.related(seed.urn), normalizeTrack).catch(() => ({ items: [], next: null }));
     if (related.items.length) {
-      root.append(el('div', { class: 'shelf-title' }, `Because You Played "${seed.title}"`),
+      root.append(el('div', { class: 'shelf-title' }, tr('Because You Played "{title}"', { title: seed.title })),
         trackList(related, (t) => page(t, normalizeTrack)).node);
     }
   }
@@ -291,25 +292,25 @@ async function discoverView(_route, alive) {
 async function genreView(route) {
   const view = await pagedTrackView(paths.genre(route.genre));
   return el('div', {},
-    hero({ kind: 'Genre', title: route.genre, meta: 'Tracks on SoundCloud', fallback: 'note' }),
+    hero({ kind: tr('Genre'), title: tr(route.genre), meta: tr('Tracks on SoundCloud'), fallback: 'note' }),
     el('div', { class: 'hero-actions' }, playButton(() => view.tracks)),
-    view.tracks.length ? view.node : empty(`SoundCloud returned no ${route.genre} tracks.`));
+    view.tracks.length ? view.node : empty(tr('SoundCloud returned no {genre} tracks.', { genre: tr(route.genre) })));
 }
 
 async function searchView(route) {
-  if (!session.user) return logOnPrompt('Log in to search SoundCloud.', 'search');
+  if (!session.user) return logOnPrompt(tr('Log in to search SoundCloud.'), 'search');
   const tab = route.tab || 'tracks';
   const root = el('div', {});
-  root.append(tabs([['tracks', 'Tracks'], ['playlists', 'Playlists'], ['people', 'People']], tab,
+  root.append(tabs([['tracks', tr('Tracks')], ['playlists', tr('Playlists')], ['people', tr('People')]], tab,
     (id) => { if (id !== tab) go({ ...route, tab: id }); }));
   if (!route.q) {
-    root.append(empty('Type in the search box and press Enter.', 'search'));
+    root.append(empty(tr('Type in the search box and press Enter.'), 'search'));
     return root;
   }
   let body;
   if (tab === 'tracks') {
     const view = await pagedTrackView(paths.searchTracks(route.q));
-    body = view.tracks.length ? view.node : empty(`No tracks found for "${route.q}".`, 'search');
+    body = view.tracks.length ? view.node : empty(tr('No tracks found for "{query}".', { query: route.q }), 'search');
   } else {
     const isPeople = tab === 'people';
     const result = await page(
@@ -318,38 +319,38 @@ async function searchView(route) {
     );
     body = result.items.length
       ? el('div', { class: 'view' }, el('div', { class: 'tiles' }, result.items.map(isPeople ? userTile : playlistTile)))
-      : empty(`No ${isPeople ? 'people' : 'playlists'} found for "${route.q}".`, 'search');
+      : empty(tr(isPeople ? 'No people found for "{query}".' : 'No playlists found for "{query}".', { query: route.q }), 'search');
   }
   root.append(body);
   return root;
 }
 
 async function likedView() {
-  if (!session.user) return empty('Log in to see your liked tracks.', 'heart');
+  if (!session.user) return empty(tr('Log in to see your liked tracks.'), 'heart');
   const view = await pagedTrackView(paths.likes());
-  if (!view.tracks.length) return empty('Tracks you like will show up here.', 'heart');
+  if (!view.tracks.length) return empty(tr('Tracks you like will show up here.'), 'heart');
   return el('div', {},
-    hero({ kind: 'Library', title: 'Liked Tracks', meta: `${session.user.username}`, fallback: 'heart-on' }),
+    hero({ kind: tr('Library'), title: tr('Liked Tracks'), meta: `${session.user.username}`, fallback: 'heart-on' }),
     el('div', { class: 'hero-actions' }, playButton(() => view.tracks)),
     view.node);
 }
 
 async function recentView() {
-  if (!session.user) return empty('Log in to see what you played.', 'clock');
+  if (!session.user) return empty(tr('Log in to see what you played.'), 'clock');
   const view = await pagedTrackView(paths.recent());
-  if (!view.tracks.length) return empty('Nothing played yet.', 'clock');
+  if (!view.tracks.length) return empty(tr('Nothing played yet.'), 'clock');
   return el('div', {},
-    hero({ kind: 'Library', title: 'Recently Played', meta: 'Your last 25 tracks', fallback: 'clock' }),
+    hero({ kind: tr('Library'), title: tr('Recently Played'), meta: tr('Your last 25 tracks'), fallback: 'clock' }),
     el('div', { class: 'hero-actions' }, playButton(() => view.tracks)),
     view.node);
 }
 
 async function followingView() {
-  if (!session.user) return empty('Log in to see who you follow.', 'users');
+  if (!session.user) return empty(tr('Log in to see who you follow.'), 'users');
   const result = await page(paths.followings(), normalizeUser);
-  if (!result.items.length) return empty('You are not following anyone yet.', 'users');
+  if (!result.items.length) return empty(tr('You are not following anyone yet.'), 'users');
   return el('div', { class: 'view' },
-    el('h1', { class: 'greeting' }, 'Following'),
+    el('h1', { class: 'greeting' }, tr('Following')),
     el('div', { class: 'tiles' }, result.items.map(userTile)));
 }
 
@@ -359,22 +360,22 @@ async function playlistView(route) {
     pagedTrackView(paths.playlistTracks(route.urn)),
   ]);
   const p = normalizePlaylist(raw);
-  const meta = [p.owner, p.count != null ? `${p.count} tracks` : null, p.duration ? fmtTime(p.duration) : null]
+  const meta = [p.owner, p.count != null ? tr('{count} tracks', { count: p.count }) : null, p.duration ? fmtTime(p.duration) : null]
     .filter(Boolean).join(' - ');
   return el('div', {},
-    hero({ kind: 'Playlist', title: p.title, meta, art: p.artwork, fallback: 'playlist' }),
+    hero({ kind: tr('Playlist'), title: p.title, meta, art: p.artwork, fallback: 'playlist' }),
     el('div', { class: 'hero-actions' },
       playButton(() => view.tracks),
-      p.link ? el('button', { onClick: () => api.open(p.link) }, 'Open on SoundCloud') : null),
-    view.tracks.length ? view.node : empty('This playlist is empty.', 'playlist'));
+      p.link ? el('button', { onClick: () => api.open(p.link) }, tr('Open on SoundCloud')) : null),
+    view.tracks.length ? view.node : empty(tr('This playlist is empty.'), 'playlist'));
 }
 
 async function relatedView(route) {
   const view = await pagedTrackView(paths.related(route.track.urn));
   return el('div', {},
-    hero({ kind: 'Tracks like', title: route.track.title, meta: route.track.artist, art: route.track.artwork, fallback: 'note' }),
+    hero({ kind: tr('Tracks like'), title: route.track.title, meta: route.track.artist, art: route.track.artwork, fallback: 'note' }),
     el('div', { class: 'hero-actions' }, playButton(() => view.tracks)),
-    view.tracks.length ? view.node : empty('SoundCloud has no related tracks for this one.'));
+    view.tracks.length ? view.node : empty(tr('SoundCloud has no related tracks for this one.')));
 }
 
 function followButton(urn) {
@@ -386,18 +387,18 @@ function followButton(urn) {
       try {
         await api.send(following ? 'DELETE' : 'POST', paths.follow(urn));
         following = !following;
-        button.textContent = following ? 'Unfollow' : 'Follow';
+        button.textContent = following ? tr('Unfollow') : tr('Follow');
       } catch (e) {
         setStatus(errorText(e));
       }
       button.disabled = false;
     },
-  }, 'Follow');
+  }, tr('Follow'));
   if (session.user && session.user.urn !== urn) {
     api.get(paths.followingIds())
       .then(({ collection }) => {
         following = collection.includes(Number(idOf(urn)));
-        button.textContent = following ? 'Unfollow' : 'Follow';
+        button.textContent = following ? tr('Unfollow') : tr('Follow');
       })
       .catch(() => {})
       .finally(() => { button.disabled = false; });
@@ -410,8 +411,8 @@ async function userView(route) {
   const tab = route.tab || 'tracks';
   const user = normalizeUser(await api.get(paths.user(route.urn)));
   const meta = [
-    user.followers != null ? `${fmtCount(user.followers)} followers` : null,
-    user.tracks != null ? `${fmtCount(user.tracks)} tracks` : null,
+    user.followers != null ? tr('{count} followers', { count: fmtCount(user.followers) }) : null,
+    user.tracks != null ? tr('{count} tracks', { count: fmtCount(user.tracks) }) : null,
     user.city,
   ].filter(Boolean).join(' - ');
   let tracks = [];
@@ -420,19 +421,19 @@ async function userView(route) {
     const result = await page(paths.userPlaylists(route.urn), normalizePlaylist);
     body = result.items.length
       ? el('div', { class: 'view' }, el('div', { class: 'tiles' }, result.items.map(playlistTile)))
-      : empty('No public playlists.', 'playlist');
+      : empty(tr('No public playlists.'), 'playlist');
   } else {
     const view = await pagedTrackView(tab === 'likes' ? paths.userLikes(route.urn) : paths.userTracks(route.urn));
     tracks = view.tracks;
-    body = view.tracks.length ? view.node : empty('No public tracks.');
+    body = view.tracks.length ? view.node : empty(tr('No public tracks.'));
   }
   return el('div', {},
-    hero({ kind: 'Artist', title: user.name, meta, art: user.avatar, fallback: 'user' }),
+    hero({ kind: tr('Artist'), title: user.name, meta, art: user.avatar, fallback: 'user' }),
     el('div', { class: 'hero-actions' },
       tab !== 'playlists' ? playButton(() => tracks) : null,
       followButton(route.urn),
-      user.link ? el('button', { onClick: () => api.open(user.link) }, 'Open on SoundCloud') : null),
-    tabs([['tracks', 'Tracks'], ['playlists', 'Playlists'], ['likes', 'Likes']], tab,
+      user.link ? el('button', { onClick: () => api.open(user.link) }, tr('Open on SoundCloud')) : null),
+    tabs([['tracks', tr('Tracks')], ['playlists', tr('Playlists')], ['likes', tr('Likes')]], tab,
       (id) => { if (id !== tab) go({ ...route, tab: id }); }),
     body);
 }
@@ -446,31 +447,31 @@ function trackProperties(track) {
   const tags = (track.tags.match(/"[^"]+"|\S+/g) || []).map((t) => t.replaceAll('"', '')).join(', ');
   return el('div', { class: 'view' },
     el('fieldset', { class: 'props' },
-      el('legend', {}, 'Properties'),
-      property('Uploaded by', track.uploader),
-      property('Length', fmtTime(track.fullDuration)),
-      property('Released', released),
-      property('Genre', track.genre),
-      property('Tags', tags),
-      property('Label', track.label),
-      property('Plays', track.plays != null ? track.plays.toLocaleString() : null),
-      property('Likes', track.likes != null ? track.likes.toLocaleString() : null),
-      property('Reposts', track.reposts != null ? track.reposts.toLocaleString() : null),
-      property('Comments', track.comments != null ? track.comments.toLocaleString() : null)),
-    track.description ? el('div', { class: 'shelf-title' }, 'Description') : null,
+      el('legend', {}, tr('Properties')),
+      property(tr('Uploaded by'), track.uploader),
+      property(tr('Length'), fmtTime(track.fullDuration)),
+      property(tr('Released'), released),
+      property(tr('Genre'), track.genre),
+      property(tr('Tags'), tags),
+      property(tr('Label'), track.label),
+      property(tr('Plays'), track.plays != null ? track.plays.toLocaleString() : null),
+      property(tr('Likes'), track.likes != null ? track.likes.toLocaleString() : null),
+      property(tr('Reposts'), track.reposts != null ? track.reposts.toLocaleString() : null),
+      property(tr('Comments'), track.comments != null ? track.comments.toLocaleString() : null)),
+    track.description ? el('div', { class: 'shelf-title' }, tr('Description')) : null,
     track.description ? el('div', { class: 'description sunken selectable-text' }, track.description) : null);
 }
 
 function trackLyrics(track) {
-  const body = el('div', { class: 'view' }, el('div', { class: 'note' }, 'Searching for lyrics...'));
+  const body = el('div', { class: 'view' }, el('div', { class: 'note' }, tr('Searching for lyrics...')));
   lyricsFor(track).then(([best]) => {
     if (!best) {
-      clear(body, empty('No lyrics found for this track.'));
+      clear(body, empty(tr('No lyrics found for this track.')));
       return;
     }
     clear(body,
       el('div', { class: 'description sunken selectable-text' }, best.lines.map((l) => el('div', { class: 'lyric-line' }, l.text))),
-      el('div', { class: 'note' }, `Lyrics from ${best.source}: ${best.artist} - ${best.title}`));
+      el('div', { class: 'note' }, tr('Lyrics from {source}: {track}', { source: best.source, track: `${best.artist} - ${best.title}` })));
   }, (e) => clear(body, el('div', { class: 'note' }, errorText(e))));
   return body;
 }
@@ -492,13 +493,13 @@ async function trackView(route) {
   });
   const showPlay = () => {
     const pausing = isCurrent() && player.playing;
-    clear(playToggle, icon(pausing ? 'pause' : 'play'), pausing ? 'Pause' : 'Play');
+    clear(playToggle, icon(pausing ? 'pause' : 'play'), pausing ? tr('Pause') : tr('Play'));
   };
   showPlay();
   whileShown(playToggle, onPlayerChange, showPlay);
 
   const like = el('button', { disabled: !session.user, onClick: () => toggleLike(track) });
-  const showLike = () => clear(like, icon(isLiked(track) ? 'heart-on' : 'heart'), isLiked(track) ? 'Liked' : 'Like');
+  const showLike = () => clear(like, icon(isLiked(track) ? 'heart-on' : 'heart'), isLiked(track) ? tr('Liked') : tr('Like'));
   showLike();
   whileShown(like, onSessionChange, showLike);
 
@@ -511,26 +512,26 @@ async function trackView(route) {
   if (tab === 'lyrics') body = trackLyrics(track);
   else if (tab === 'related') {
     const view = await pagedTrackView(paths.related(track.urn));
-    body = view.tracks.length ? view.node : empty('SoundCloud has no related tracks for this one.');
+    body = view.tracks.length ? view.node : empty(tr('SoundCloud has no related tracks for this one.'));
   } else body = trackProperties(track);
 
   return el('div', {},
-    hero({ kind: 'Track', title: track.title, meta: uploader, art: track.artwork, fallback: 'note' }),
+    hero({ kind: tr('Track'), title: track.title, meta: uploader, art: track.artwork, fallback: 'note' }),
     el('div', { class: 'hero-actions' },
       playToggle,
       like,
-      el('button', { disabled: blocked, onClick: () => enqueue(track) }, 'Add to Up Next'),
-      el('button', { disabled: !session.user, onClick: () => addToPlaylist(track) }, 'Add to Playlist...'),
+      el('button', { disabled: blocked, onClick: () => enqueue(track) }, tr('Add to Up Next')),
+      el('button', { disabled: !session.user, onClick: () => addToPlaylist(track) }, tr('Add to Playlist...')),
       el('button', {
         disabled: blocked,
         onClick: () => {
           if (!isCurrent()) play();
           showKaraoke();
         },
-      }, icon('mic'), 'Karaoke'),
-      track.link ? el('button', { onClick: () => api.open(track.link) }, 'Open on SoundCloud') : null),
+      }, icon('mic'), tr('Karaoke')),
+      track.link ? el('button', { onClick: () => api.open(track.link) }, tr('Open on SoundCloud')) : null),
     track.waveform ? el('div', { class: 'wave-row' }, waveformView(track, { onPlay: play })) : null,
-    tabs([['details', 'Details'], ['lyrics', 'Lyrics'], ['related', 'Related Tracks']], tab,
+    tabs([['details', tr('Details')], ['lyrics', tr('Lyrics')], ['related', tr('Related Tracks')]], tab,
       (id) => { if (id !== tab) go({ ...route, tab: id }); }),
     body);
 }
@@ -550,15 +551,15 @@ const VIEWS = {
 };
 
 export async function createPlaylist() {
-  if (!session.user) return setStatus('Log in to create playlists.');
-  const title = await prompt('New Playlist', 'Name:', { okText: 'Create' });
+  if (!session.user) return setStatus(tr('Log in to create playlists.'));
+  const title = await prompt('New Playlist', tr('Name:'), { okText: tr('Create') });
   if (!title) return undefined;
   try {
     const raw = await api.send('POST', '/playlists', { playlist: { title, sharing: 'private', tracks: [] } });
     const created = normalizePlaylist(raw);
     session.playlists.unshift(created);
     emitChange();
-    setStatus(`Created "${title}"`);
+    setStatus(tr('Created "{title}"', { title }));
     return created;
   } catch (e) {
     setStatus(errorText(e));
@@ -568,27 +569,27 @@ export async function createPlaylist() {
 
 async function addToPlaylist(track) {
   const owned = session.playlists;
-  const choice = await dialog('Add to Playlist', (close) => ({
+  const choice = await dialog(tr('Add to Playlist'), (close) => ({
     body: owned.length
       ? el('div', { class: 'sunken', style: 'max-height:220px;overflow:auto;padding:2px' },
         owned.map((p) => el('div', { class: 'menu-item', style: 'grid-template-columns:18px 1fr', onClick: () => close(p) },
           icon('playlist'), el('span', {}, p.title))))
-      : el('p', {}, 'You have no playlists yet.'),
+      : el('p', {}, tr('You have no playlists yet.')),
     buttons: [
-      el('button', { onClick: () => close('new') }, 'New Playlist...'),
-      el('button', { onClick: () => close() }, 'Cancel'),
+      el('button', { onClick: () => close('new') }, tr('New Playlist...')),
+      el('button', { onClick: () => close() }, tr('Cancel')),
     ],
   }));
   const target = choice === 'new' ? await createPlaylist() : choice;
   if (!target) return;
   try {
-    setStatus(`Adding to "${target.title}"...`, { sticky: true });
+    setStatus(tr('Adding to "{title}"...', { title: target.title }), { sticky: true });
     // PUT replaces the whole track list, so the existing tracks must be resent.
     const ids = (await api.get(paths.playlist(target.urn))).tracks.map((t) => t.id);
     const id = Number(idOf(track.urn));
-    if (ids.includes(id)) return setStatus(`"${track.title}" is already in "${target.title}"`);
+    if (ids.includes(id)) return setStatus(tr('"{title}" is already in "{playlist}"', { title: track.title, playlist: target.title }));
     await api.send('PUT', paths.playlist(target.urn), { playlist: { tracks: [...ids, id] } });
-    setStatus(`Added "${track.title}" to "${target.title}"`);
+    setStatus(tr('Added "{title}" to "{playlist}"', { title: track.title, playlist: target.title }));
   } catch (e) {
     setStatus(errorText(e));
   }

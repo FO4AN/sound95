@@ -1,6 +1,7 @@
 // Floating Win95 windows inside the app, for things that stay up while you browse.
 // Dragged by the title bar, sized by the corner grip, and remembered between runs.
 
+import { tr } from './i18n.js';
 import { el, clear } from './dom.js';
 import { icon, setIcon } from './icons.js';
 import { closeMenu, showMenu } from './dialogs.js';
@@ -32,8 +33,8 @@ function focus(win) {
 
 /** `menus` maps a menu title to a function returning its items. */
 export function floatWindow({ id, title, iconName, width, height, minWidth = 280, minHeight = 200, menus = {}, onClose }) {
-  const closeButton = el('button', { class: 'caption', ariaLabel: 'Close' }, icon('close'));
-  const maxButton = el('button', { class: 'caption', ariaLabel: 'Maximize' }, icon('max'));
+  const closeButton = el('button', { class: 'caption', ariaLabel: tr('Close') }, icon('close'));
+  const maxButton = el('button', { class: 'caption', ariaLabel: tr('Maximize') }, icon('max'));
   const bar = el('div', { class: 'titlebar' },
     el('span', { class: 'float-icon' }, icon(iconName)),
     el('span', { class: 'titlebar-text' }, title),
@@ -52,14 +53,16 @@ export function floatWindow({ id, title, iconName, width, height, minWidth = 280
   const apply = () => {
     if (maximized) {
       const area = document.getElementById('workspace').getBoundingClientRect();
-      Object.assign(node.style, { left: `${area.left}px`, top: `${area.top}px`, width: `${area.width}px`, height: `${area.height}px` });
+      Object.assign(node.style, { transform: `translate(${area.left}px, ${area.top}px)`, width: `${area.width}px`, height: `${area.height}px` });
       return;
     }
     place.w = Math.min(Math.max(minWidth, place.w), window.innerWidth);
     place.h = Math.min(Math.max(minHeight, place.h), window.innerHeight);
     place.x = Math.max(EDGE - place.w, Math.min(place.x, window.innerWidth - EDGE));
     place.y = Math.max(0, Math.min(place.y, window.innerHeight - EDGE));
-    Object.assign(node.style, { left: `${place.x}px`, top: `${place.y}px`, width: `${place.w}px`, height: `${place.h}px` });
+    // A transform moves the finished window, where left and top would lay out and
+    // repaint it each time, which makes a busy one like karaoke stutter.
+    Object.assign(node.style, { transform: `translate(${Math.round(place.x)}px, ${Math.round(place.y)}px)`, width: `${place.w}px`, height: `${place.h}px` });
   };
 
   /** Brings the whole window back in after the app has shrunk around it. */
@@ -73,15 +76,35 @@ export function floatWindow({ id, title, iconName, width, height, minWidth = 280
   const tracked = (move, done) => (down) => {
     if (down.button !== 0 || maximized) return;
     down.preventDefault();
-    const from = { x: down.clientX, y: down.clientY, ...place };
-    const onMove = (e) => { move(e.clientX - from.x, e.clientY - from.y, from); apply(); };
-    const onUp = () => {
-      window.removeEventListener('pointermove', onMove);
-      window.removeEventListener('pointerup', onUp);
+    const handle = down.currentTarget;
+    const from = { ...place };
+    let latest = null;
+    let frame = 0;
+    const paint = () => {
+      frame = 0;
+      if (!latest) return;
+      move(latest.clientX - down.clientX, latest.clientY - down.clientY, from);
+      latest = null;
+      apply();
+    };
+    const finish = () => {
+      for (const name of ['pointermove', 'pointerup', 'pointercancel', 'lostpointercapture']) {
+        window.removeEventListener(name, name === 'pointermove' ? onMove : finish);
+      }
+      cancelAnimationFrame(frame);
+      paint();
       done();
     };
+    const onMove = (e) => {
+      // A button let go outside the app never reports it, so don't stay stuck to the pointer.
+      if (!e.buttons) { finish(); return; }
+      latest = e;
+      frame ||= requestAnimationFrame(paint);
+    };
+    // Keeps the drag going past the edge of the app, where the window would lose it.
+    try { handle.setPointerCapture(down.pointerId); } catch { /* not a real pointer */ }
     window.addEventListener('pointermove', onMove);
-    window.addEventListener('pointerup', onUp);
+    for (const name of ['pointerup', 'pointercancel', 'lostpointercapture']) window.addEventListener(name, finish);
   };
   const remember = () => savePlace(id, { x: place.x, y: place.y, w: place.w, h: place.h });
 
@@ -127,7 +150,7 @@ export function floatWindow({ id, title, iconName, width, height, minWidth = 280
         titleNode.classList.add('open');
         showMenu(items(), rect.left, rect.bottom, { onClose: () => titleNode.classList.remove('open') });
       },
-    }, name);
+    }, tr(name));
     menubar.append(titleNode);
   }
 

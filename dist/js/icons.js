@@ -1,12 +1,29 @@
 // 16x16 pixel art in the Windows 95 16-colour palette, rendered as crisp SVG.
 
 const PALETTE = {
-  k: '#000000', w: '#ffffff', g: '#c0c0c0', d: '#808080',
+  k: 'var(--ink)', w: 'var(--ink-back)', g: '#c0c0c0', d: '#808080',
   n: '#000080', b: '#0000ff', t: '#008080', c: '#00ffff',
   r: '#ff0000', m: '#800000', y: '#ffff00', o: '#808000',
 };
 
 const ART = {
+  gear: `
+......kkkk......
+...k..kggk..k...
+..kgk.kggk.kgk..
+.kgggkkggkkgggk.
+..kggggggggggk..
+...kggkkkkggk...
+kkkkgk....kgkkkk
+kgggk......kgggk
+kgggk......kgggk
+kkkkgk....kgkkkk
+...kggkkkkggk...
+..kggggggggggk..
+.kgggkkggkkgggk.
+..kgk.kggk.kgk..
+...k..kggk..k...
+......kkkk......`,
   note: `
 .......kkkkkkk..
 .......kkkkkkk..
@@ -611,7 +628,7 @@ export function icon(name) {
       rect.setAttribute('y', y);
       rect.setAttribute('width', 1);
       rect.setAttribute('height', 1);
-      rect.setAttribute('fill', fill);
+      rect.style.fill = fill;
       svg.append(rect);
     });
   });

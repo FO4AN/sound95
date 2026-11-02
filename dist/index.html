@@ -14,37 +14,37 @@
         <span class="titlebar-icon" id="title-icon"></span>
         <span class="titlebar-text" id="title-text" data-tauri-drag-region>Sound95</span>
         <span class="titlebar-buttons">
-          <button class="caption" id="win-min" aria-label="Minimize"></button>
-          <button class="caption" id="win-max" aria-label="Maximize"></button>
-          <button class="caption" id="win-close" aria-label="Close"></button>
+          <button class="caption" id="win-min" data-tip="Minimize" aria-label="Minimize"></button>
+          <button class="caption" id="win-max" data-tip="Maximize" aria-label="Maximize"></button>
+          <button class="caption" id="win-close" data-tip="Close" aria-label="Close"></button>
         </span>
       </div>
       <div class="menubar" id="menubar"></div>
 
       <div class="toolbar">
-        <button class="tool" id="nav-back" aria-label="Back" title="Back"></button>
-        <button class="tool" id="nav-forward" aria-label="Forward" title="Forward"></button>
-        <button class="tool" id="nav-home" aria-label="Home" title="Home"></button>
+        <button class="tool" id="nav-back" data-tip="Back" aria-label="Back" title="Back"></button>
+        <button class="tool" id="nav-forward" data-tip="Forward" aria-label="Forward" title="Forward"></button>
+        <button class="tool" id="nav-home" data-tip="Home" aria-label="Home" title="Home"></button>
         <span class="tool-sep"></span>
         <label class="address">
-          <span>Search:</span>
-          <input id="search-box" type="text" spellcheck="false" autocomplete="off" placeholder="Tracks, playlists, people">
+          <span data-t="Search:">Search:</span>
+          <input id="search-box" type="text" spellcheck="false" autocomplete="off" data-hint="Tracks, playlists, people" placeholder="Tracks, playlists, people">
         </label>
-        <button id="search-go">Go</button>
+        <button id="search-go" data-t="Go">Go</button>
         <span class="tool-sep"></span>
         <button class="account" id="account-button"></button>
       </div>
 
       <div class="workspace" id="workspace">
         <div class="left">
-          <nav class="sidebar sunken" id="sidebar" aria-label="Library"></nav>
+          <nav class="sidebar sunken" id="sidebar" data-tip="Library" aria-label="Library"></nav>
           <div class="widget-slot" id="widget-slot"></div>
         </div>
         <main class="content sunken" id="content"></main>
-        <aside class="queue" id="queue-panel" aria-label="Up next">
+        <aside class="queue" id="queue-panel" data-tip="Up next" aria-label="Up next">
           <div class="pane-head">
-            <span>Up Next</span>
-            <button id="queue-clear">Clear</button>
+            <span data-t="Up Next">Up Next</span>
+            <button id="queue-clear" data-t="Clear">Clear</button>
           </div>
           <div class="queue-list sunken" id="queue-list"></div>
         </aside>
@@ -57,40 +57,40 @@
             <button class="link np-title" id="np-title" disabled>Nothing playing</button>
             <button class="link np-artist" id="np-artist" disabled></button>
           </div>
-          <button class="tool" id="np-like" aria-label="Like" title="Like" disabled></button>
+          <button class="tool" id="np-like" data-tip="Like" aria-label="Like" title="Like" disabled></button>
         </div>
         <div class="transport">
           <div class="transport-buttons">
-            <button class="tool toggle" id="tp-shuffle" aria-label="Shuffle" title="Shuffle"></button>
-            <button class="tool" id="tp-prev" aria-label="Previous" title="Previous"></button>
-            <button class="tool tool-play" id="tp-play" aria-label="Play" title="Play"></button>
-            <button class="tool" id="tp-next" aria-label="Next" title="Next"></button>
-            <button class="tool toggle" id="tp-repeat" aria-label="Repeat" title="Repeat"></button>
+            <button class="tool toggle" id="tp-shuffle" data-tip="Shuffle" aria-label="Shuffle" title="Shuffle"></button>
+            <button class="tool" id="tp-prev" data-tip="Previous" aria-label="Previous" title="Previous"></button>
+            <button class="tool tool-play" id="tp-play" data-tip="Play" aria-label="Play" title="Play"></button>
+            <button class="tool" id="tp-next" data-tip="Next" aria-label="Next" title="Next"></button>
+            <button class="tool toggle" id="tp-repeat" data-tip="Repeat" aria-label="Repeat" title="Repeat"></button>
           </div>
           <div class="seek-row">
             <span class="time" id="time-now">0:00</span>
-            <input type="range" class="slider" id="seek" min="0" max="1000" value="0" step="1" aria-label="Seek" disabled>
+            <input type="range" class="slider" id="seek" min="0" max="1000" value="0" step="1" data-tip="Seek" aria-label="Seek" disabled>
             <span class="time" id="time-total">0:00</span>
           </div>
         </div>
         <div class="np-right">
-          <canvas class="mini-viz" id="mini-viz" title="Open the visualizer"></canvas>
-          <button class="tool toggle" id="viz-toggle" aria-label="Visualizer" title="Visualizer"></button>
-          <button class="tool toggle" id="karaoke-toggle" aria-label="Karaoke" title="Karaoke"></button>
-          <button class="tool toggle" id="queue-toggle" aria-label="Up Next" title="Up Next"></button>
+          <canvas class="mini-viz" id="mini-viz" data-tip="Open the visualizer" title="Open the visualizer"></canvas>
+          <button class="tool toggle" id="viz-toggle" data-tip="Visualizer" aria-label="Visualizer" title="Visualizer"></button>
+          <button class="tool toggle" id="karaoke-toggle" data-tip="Karaoke" aria-label="Karaoke" title="Karaoke"></button>
+          <button class="tool toggle" id="queue-toggle" data-tip="Up Next" aria-label="Up Next" title="Up Next"></button>
           <span class="vol-icon" id="vol-icon"></span>
-          <input type="range" class="slider" id="volume" min="0" max="100" value="80" aria-label="Volume">
+          <input type="range" class="slider" id="volume" min="0" max="100" value="80" data-tip="Volume" aria-label="Volume">
         </div>
       </div>
 
       <div class="statusbar">
-        <span class="status-cell grow" id="status">Ready</span>
-        <span class="status-cell" id="status-source">Streaming from SoundCloud</span>
+        <span class="status-cell grow" id="status" data-t="Ready">Ready</span>
+        <span class="status-cell" id="status-source" data-t="Streaming from SoundCloud">Streaming from SoundCloud</span>
       </div>
     </div>
 
     <div class="taskbar">
-      <button class="start" id="start-button"><span id="start-icon"></span>Start</button>
+      <button class="start" id="start-button"><span id="start-icon"></span><span data-t="Start">Start</span></button>
       <span class="task-sep"></span>
       <button class="task pressed" id="task-button"></button>
       <span class="tray sunken-thin">
