@@ -4,7 +4,7 @@ import { api } from './api.js';
 import { clear, el, errorText, fmtTime, setStatus } from './dom.js';
 import { icon, setIcon } from './icons.js';
 import { checkForUpdates, watchForUpdates } from './updates.js';
-import { aboutDialog, audioSetupDialog, closeMenu, logonDialog, message, showMenu } from './dialogs.js';
+import { aboutDialog, audioAskDialog, audioSetupDialog, closeMenu, logonDialog, message, showMenu } from './dialogs.js';
 import { isLiked, loadSession, onSessionChange, session, toggleLike } from './session.js';
 import {
   clearUpcoming, cycleRepeat, durationMs, getVolume, jumpTo, next, onPlayerChange, onProgress, player, positionMs,
@@ -374,8 +374,11 @@ function tick() {
 tick();
 setInterval(tick, 10_000);
 
+const AUDIO_TRIED = 'sound95.audioTried';
+
 async function ensureAudio() {
   const audioState = await api.audioStatus();
+  if (audioState.ready) localStorage.removeItem(AUDIO_TRIED);
   if (audioState.ready) return;
   const showCommand = () => message('Sound95', 'Sound95 could not install the audio plug-ins it needs.', {
     kind: 'warn',
@@ -383,12 +386,18 @@ async function ensureAudio() {
       el('p', {}, 'To install them yourself, run:'),
       el('div', { class: 'selectable' }, audioState.command)) : null,
   });
-  if (!audioState.can_install) {
+  // Installing didn't help last time, so asking for the password again would only loop.
+  if (!audioState.can_install || localStorage.getItem(AUDIO_TRIED)) {
     await showCommand();
+    return;
+  }
+  if (!await audioAskDialog()) {
+    setStatus('Audio plug-ins were not installed, so tracks will not play.', { sticky: true });
     return;
   }
   const result = await audioSetupDialog();
   if (result.ok) {
+    localStorage.setItem(AUDIO_TRIED, '1');
     await api.relaunch();
   } else if (result.error?.code === 'audio_declined') {
     setStatus('Audio plug-ins were not installed, so tracks will not play.', { sticky: true });

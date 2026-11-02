@@ -113,7 +113,21 @@ export function logonDialog() {
   });
 }
 
-/** Installs the audio plug-ins. The system's password prompt is the approval. */
+/** Resolves true if you want the plug-ins, which is what opens a password prompt. */
+export function audioAskDialog() {
+  return dialog('Audio Plug-ins Needed', (close) => ({
+    body: el('div', { class: 'dialog-row' },
+      el('span', { class: 'dialog-icon' }, icon('speaker')),
+      el('p', {}, 'Sound95 needs a few audio plug-ins to play music. Installing them asks for your password.')),
+    buttons: [
+      el('button', { class: 'default', onClick: () => close(true) }, 'Install'),
+      el('button', { onClick: () => close(false) }, 'Not Now'),
+    ],
+    onDismiss: () => close(false),
+  }));
+}
+
+/** Installs the audio plug-ins. */
 export function audioSetupDialog() {
   return dialog('Setting Up Audio', (close) => {
     api.audioInstall().then(() => close({ ok: true }), (error) => close({ ok: false, error }));
