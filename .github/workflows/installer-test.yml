@@ -1,0 +1,41 @@
+name: Installer test
+
+on:
+  workflow_dispatch:
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - name: Install the previous release, then update it with the latest
+        run: |
+          $tags = gh release list --limit 2 --json tagName --jq '.[].tagName'
+          $latest, $previous = $tags
+          gh release download $previous -p '*x64-setup.exe' -D old
+          gh release download $latest -p '*x64-setup.exe' -D new
+          $exe = "$env:LOCALAPPDATA\Sound95\sound95.exe"
+
+          Start-Process (Get-Item old\*.exe).FullName -ArgumentList '/S' -Wait
+          if (-not (Test-Path $exe)) { throw "the installer left no app at $exe" }
+          "installed: $((Get-Item $exe).VersionInfo.ProductVersion)"
+
+          $app = Start-Process $exe -PassThru
+          Start-Sleep -Seconds 12
+          if ($app.HasExited) { throw "the app exited with $($app.ExitCode)" }
+          "running, window: '$((Get-Process -Id $app.Id).MainWindowTitle)'"
+          "webview processes: $((Get-Process msedgewebview2 -ErrorAction SilentlyContinue).Count)"
+
+          Start-Process (Get-Item new\*.exe).FullName -ArgumentList '/S','/UPDATE' -Wait
+          Start-Sleep -Seconds 3
+          "updated: $((Get-Item $exe).VersionInfo.ProductVersion)"
+          if ((Get-Item $exe).VersionInfo.ProductVersion -notlike "$($latest.TrimStart('v'))*") { throw "still the old version" }
+
+          Stop-Process -Name sound95 -Force -ErrorAction SilentlyContinue
+          $app = Start-Process $exe -PassThru
+          Start-Sleep -Seconds 10
+          if ($app.HasExited) { throw "the updated app exited with $($app.ExitCode)" }
+          "updated app runs, window: '$((Get-Process -Id $app.Id).MainWindowTitle)'"
+          Stop-Process -Id $app.Id -Force
