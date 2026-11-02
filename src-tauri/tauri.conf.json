@@ -44,12 +44,12 @@
       "createUpdaterArtifacts": true,
       "publishing": {
         "provider": "github",
-        "owner": "USER",
-        "repo": "REPO",
+        "owner": "FO4AN",
+        "repo": "soundscape",
         "releaseCommit": null
       },
       "endpoints": [
-        "https://github.com/USER/REPO/releases/latest/download/{arch}-latest.json"
+        "https://github.com/FO4AN/soundscape/releases/latest/download/{arch}-latest.json"
       ]
     }
   }
