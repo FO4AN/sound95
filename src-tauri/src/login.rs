@@ -17,11 +17,18 @@ use url::Url;
 
 const WINDOW: &str = "login";
 const RENEW_WINDOW: &str = "renew";
+const PAGE_WINDOW: &str = "track-page";
+const SITE: &str = "soundcloud.com";
 const SIGN_IN_URL: &str = "https://soundcloud.com/signin";
 const RENEW_URL: &str = "https://soundcloud.com/";
 const SESSION_COOKIE: &str = "oauth_token";
 const POLL: Duration = Duration::from_millis(400);
 const RENEW_TIMEOUT: Duration = Duration::from_secs(20);
+/// SoundCloud's pages can start playing as they load, which would sound over
+/// Sound95 and count as a play. These windows are never there for the audio, so
+/// `play` fails the way it does when a browser blocks autoplay.
+const NO_PLAYBACK: &str = "HTMLMediaElement.prototype.play = () => Promise.reject(new DOMException('Playback is off in this window.', 'NotAllowedError'));\
+document.addEventListener('play', (e) => e.target.pause(), true);";
 
 #[cfg_attr(not(debug_assertions), allow(unused_variables))]
 fn page_url(real: &str, override_var: &str) -> Url {
@@ -109,6 +116,7 @@ pub async fn renew(handle: &AppHandle, rejected: &str) -> Option<Token> {
     }
     let page = WebviewUrl::External(page_url(RENEW_URL, "SOUND95_RENEW_URL"));
     let window = WebviewWindowBuilder::new(handle, RENEW_WINDOW, page)
+        .initialization_script(NO_PLAYBACK)
         .visible(false)
         .build()
         .ok()?;
@@ -121,6 +129,41 @@ pub async fn renew(handle: &AppHandle, rejected: &str) -> Option<Token> {
     }
     let _ = window.destroy();
     access.map(|access| Token { access })
+}
+
+/// Shows a track's real SoundCloud page, signed in, for its Like button. SoundCloud's
+/// bot check turns away likes sent by an app, but a person on its own page is fine.
+/// The page can't call the app, like the sign-in page.
+pub fn open_track_page(handle: &AppHandle, link: &str) -> Result<(), AppError> {
+    let bad = || AppError::new("bad_request", "Not a SoundCloud page.");
+    let url = Url::parse(link).map_err(|_| bad())?;
+    if url.scheme() != "https" || !on_site(url.host_str().unwrap_or_default(), SITE) {
+        return Err(bad());
+    }
+    let url = page_url(url.as_str(), "SOUND95_TRACK_PAGE");
+    if let Some(window) = handle.get_webview_window(PAGE_WINDOW) {
+        window.navigate(url).map_err(window_err)?;
+        return window.set_focus().map_err(window_err);
+    }
+    let mut builder = WebviewWindowBuilder::new(handle, PAGE_WINDOW, WebviewUrl::External(url))
+        .initialization_script(NO_PLAYBACK)
+        .title("SoundCloud")
+        .inner_size(980.0, 720.0);
+    if let Some(main) = handle.get_webview_window("main") {
+        builder = builder.parent(&main).map_err(window_err)?;
+    }
+    builder.build().map_err(window_err)?;
+    Ok(())
+}
+
+pub fn track_page_open(handle: &AppHandle) -> bool {
+    handle.get_webview_window(PAGE_WINDOW).is_some()
+}
+
+pub fn close_track_page(handle: &AppHandle) {
+    if let Some(window) = handle.get_webview_window(PAGE_WINDOW) {
+        let _ = window.destroy();
+    }
 }
 
 fn window_err(e: tauri::Error) -> AppError {
@@ -139,6 +182,7 @@ pub fn cancel(handle: &AppHandle) {
 /// Closes the windows that would otherwise outlive the main one.
 pub fn close_all(handle: &AppHandle) {
     cancel(handle);
+    close_track_page(handle);
     if let Some(window) = handle.get_webview_window(RENEW_WINDOW) {
         let _ = window.destroy();
     }
@@ -166,5 +210,17 @@ mod tests {
         assert!(!on_site("evilsoundcloud.com", "soundcloud.com"));
         assert!(!on_site("soundcloud.com.evil.example", "soundcloud.com"));
         assert!(!on_site("", "soundcloud.com"));
+    }
+
+    #[test]
+    fn only_soundcloud_pages_open() {
+        let refused = |link: &str| {
+            let url = Url::parse(link).unwrap();
+            url.scheme() != "https" || !on_site(url.host_str().unwrap_or_default(), SITE)
+        };
+        assert!(!refused("https://soundcloud.com/xight/hello"));
+        assert!(refused("http://soundcloud.com/xight/hello"));
+        assert!(refused("https://soundcloud.com.evil.example/xight"));
+        assert!(refused("javascript:alert(1)"));
     }
 }

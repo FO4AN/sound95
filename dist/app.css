@@ -358,4 +358,3 @@ select.dropdown:focus-visible { outline: 1px dotted var(--text); outline-offset:
 .options label { display: flex; align-items: flex-start; gap: 6px; }
 .options input { margin: 1px 0 0; flex: none; accent-color: var(--select); }
 .options input:disabled + * { color: var(--disabled); }
-.refused-open { margin-top: 8px; padding: 0 10px; }

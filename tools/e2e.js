@@ -21,6 +21,10 @@
   window.addEventListener('error', (e) => e.message !== 'Script error.' && fail(`js error: ${e.message} at ${e.filename}:${e.lineno}`));
   window.addEventListener('unhandledrejection', (e) => fail(`rejection: ${e.reason?.message || JSON.stringify(e.reason)}`));
 
+  // This runs on someone's desktop, and a stray real click would change what's being tested.
+  document.documentElement.style.pointerEvents = 'none';
+  document.addEventListener('click', (e) => { if (e.isTrusted) log(`INFO real click on ${e.target.tagName}.${e.target.className}`); }, true);
+
   const $ = (s) => document.querySelector(s);
   const $$ = (s) => [...document.querySelectorAll(s)];
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -313,22 +317,36 @@
     const elsewhere = seen.filter((r) => /^\/(lrclib|netease|genius|wave)/.test(r.path));
     await check(() => elsewhere.length && elsewhere.every((r) => !r.auth), 'the session never reaches lyrics or waveform hosts');
 
+    // The heart opens the track's own page, and the like shows up once it reaches the account.
+    const trackPageOpen = () => invoke('track_page_open');
     const row = $$('.row')[4];
+    const liked = () => row.querySelector('.heart').innerHTML;
+    const emptyHeart = liked();
+    const clickLike = () => invoke('api_get', { target: `/__click-like?title=${encodeURIComponent(row.querySelector('.title').textContent)}` });
     row.querySelector('.heart').click();
-    await check(() => row.querySelector('.heart svg'), 'like shows a heart');
-    await check(() => byText('#status', 'Added'), 'like reaches SoundCloud', 6000);
+    await check(trackPageOpen, 'the heart opens the track page');
+    await check(() => byText('#status', 'Click Like'), 'it says what to do there');
+    await check(async () => (await invoke('api_get', { target: '/__page-audio' })).silent === true, 'the page cannot start playing');
+    await clickLike();
+    await check(() => byText('#status', 'Added') && liked() !== emptyHeart, 'a like on the page reaches the heart', 8000);
+    await check(async () => !(await trackPageOpen()), 'the page closes by itself after a like');
+    row.querySelector('.heart').click();
+    await check(trackPageOpen, 'the heart opens the page to unlike too');
+    await clickLike();
+    await check(() => byText('#status', 'Removed') && liked() === emptyHeart, 'an unlike on the page reaches the heart', 8000);
+    row.querySelector('.heart').click();
+    await check(trackPageOpen, 'the page opens again');
+    await invoke('close_track_page');
+    await check(() => byText('#status', 'Ready') && liked() === emptyHeart, 'closing the page changes nothing', 8000);
 
     context($$('.row')[30]);
     await clickText('.menu-item', 'Add to Playlist');
     await clickText('.dialog .menu-item', 'Boot Sector Ballads');
     await check(() => byText('#status', 'Added "'), 'add to playlist');
 
-    await invoke('api_get', { target: '/__refuse-likes' });
-    const heartBefore = $$('.row .heart')[6].innerHTML;
-    $$('.row .heart')[6].click();
-    await check(() => byText('.dialog p', 'SoundCloud would not accept'), 'a refused like explains itself');
-    await check(() => $('.dialog .refused-open') && $$('.row .heart')[6].innerHTML === heartBefore, 'a refused like offers its page and undoes the heart');
-    await clickText('.dialog button', 'OK');
+    await invoke('api_get', { target: '/__refuse-next' });
+    const refused = await invoke('api_send', { method: 'POST', path: '/me/followings/1', body: null }).catch((e) => e);
+    await check(() => refused?.code === 'forbidden', 'a refused change reports it');
     await log('REFUSAL');
     await check(async () => (await invoke('api_get', { target: '/__flaky' })).ok, 'a read that hits a bad moment is tried again');
 

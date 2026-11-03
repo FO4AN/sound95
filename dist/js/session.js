@@ -2,17 +2,18 @@
 
 import { tr } from './i18n.js';
 import { api, normalizePlaylist, page, paths, setMe, trackUrn } from './api.js';
-import { el, errorText, setStatus } from './dom.js';
-import { message } from './dialogs.js';
+import { errorText, setStatus } from './dom.js';
 
 export const session = {
   user: null,
   liked: new Set(),
-  unliked: new Set(),
   playlists: [],
 };
 
+const WATCH_EVERY_MS = 3000;
+
 const listeners = new Set();
+let watching = 0; // only the newest like window is watched
 export function onSessionChange(fn) { listeners.add(fn); return () => listeners.delete(fn); }
 export function emitChange() { listeners.forEach((fn) => fn()); }
 
@@ -20,7 +21,6 @@ export async function loadSession() {
   const status = await api.status();
   session.user = null;
   session.liked = new Set();
-  session.unliked = new Set();
   session.playlists = [];
   setMe(null);
   try {
@@ -41,42 +41,38 @@ export async function loadSession() {
 }
 
 export function isLiked(track) {
-  if (!track) return false;
-  if (session.unliked.has(track.urn)) return false;
-  return session.liked.has(track.urn);
+  return !!track && session.liked.has(track.urn);
 }
 
-const liking = new Set(); // a quick second click would race the first
+const fetchLiked = async () => new Set((await api.get(paths.likeIds())).collection.map(trackUrn));
 
-function likeRefused(track) {
-  return message(tr('Like'), tr('SoundCloud would not accept this like from Sound95. You can still like the track on its SoundCloud page.'), {
-    kind: 'warn',
-    extra: track.link ? el('button', { class: 'refused-open', onClick: () => api.open(track.link) }, tr('Open on SoundCloud')) : null,
-  });
-}
-
+/**
+ * SoundCloud's bot check turns away likes sent by an app, so the heart opens the track's
+ * own page for you to click Like on, and this watches for that to reach your account.
+ */
 export async function toggleLike(track) {
   if (!session.user) {
     setStatus(tr('Log in to like tracks.'));
     return;
   }
-  if (liking.has(track.urn)) return;
-  liking.add(track.urn);
+  const mine = ++watching;
   const was = isLiked(track);
-  const apply = (liked) => {
-    if (liked) { session.liked.add(track.urn); session.unliked.delete(track.urn); }
-    else { session.liked.delete(track.urn); session.unliked.add(track.urn); }
-    emitChange();
-  };
-  apply(!was);
   try {
-    await api.send(was ? 'DELETE' : 'PUT', paths.like(track.urn));
-    setStatus(was ? tr('Removed "{title}" from Liked Tracks', { title: track.title }) : tr('Added "{title}" to Liked Tracks', { title: track.title }));
+    await api.openTrackPage(track.link);
+    setStatus(tr('Click Like on the SoundCloud page.'), { sticky: true });
+    let open = true;
+    while (open && mine === watching && isLiked(track) === was) {
+      await new Promise((done) => { setTimeout(done, WATCH_EVERY_MS); });
+      open = await api.trackPageOpen();
+      if (mine !== watching) return;
+      session.liked = await fetchLiked().catch(() => session.liked);
+    }
+    if (mine !== watching) return;
+    await api.closeTrackPage();
+    emitChange();
+    if (isLiked(track) === was) setStatus(tr('Ready'));
+    else setStatus(was ? tr('Removed "{title}" from Liked Tracks', { title: track.title }) : tr('Added "{title}" to Liked Tracks', { title: track.title }));
   } catch (e) {
-    apply(was);
     setStatus(errorText(e));
-    if (e?.code === 'forbidden') likeRefused(track);
-  } finally {
-    liking.delete(track.urn);
   }
 }

@@ -15,6 +15,30 @@ const PORT = Number(process.env.MOCK_PORT || 17996);
 const ORIGIN = `http://127.0.0.1:${PORT}`;
 
 const log = [];
+
+// Like the real page, this one tries to play as soon as it loads.
+const silence = () => {
+  const samples = Buffer.alloc(8000, 128);
+  const header = Buffer.alloc(44);
+  header.write('RIFF', 0);
+  header.writeUInt32LE(36 + samples.length, 4);
+  header.write('WAVEfmt ', 8);
+  header.writeUInt32LE(16, 16);
+  header.writeUInt16LE(1, 20);
+  header.writeUInt16LE(1, 22);
+  header.writeUInt32LE(8000, 24);
+  header.writeUInt32LE(8000, 28);
+  header.writeUInt16LE(1, 32);
+  header.writeUInt16LE(8, 34);
+  header.write('data', 36);
+  header.writeUInt32LE(samples.length, 40);
+  return `data:audio/wav;base64,${Buffer.concat([header, samples]).toString('base64')}`;
+};
+const TRACK_PAGE = `<!doctype html><button>Like</button><audio autoplay src="${silence()}"></audio><script>
+  const players = [document.querySelector('audio'), new Audio(document.querySelector('audio').src)];
+  players[1].play().catch(() => {});
+  setTimeout(() => fetch('/__page-audio?silent=' + players.every((p) => p.paused)), 500);
+</script>`;
 const access = new Set();
 const refresh = new Set();
 const signIn = { ipc: null, leftover: null }; // what the last sign-in page saw
@@ -160,8 +184,9 @@ function lyricsRoute(path, url, res) {
   return false;
 }
 
-let refuseLikes = false;
+let refuseNext = false;
 let flaky = false;
+let pageSilent = null;
 
 const server = createServer(async (req, res) => {
   const url = new URL(req.url, ORIGIN);
@@ -187,6 +212,11 @@ const server = createServer(async (req, res) => {
   }
   if (lyricsRoute(path, url, res)) return undefined;
 
+  if (path === '/track-page') return html(res, TRACK_PAGE);
+  if (path === '/__page-audio') {
+    if (url.searchParams.has('silent')) pageSilent = url.searchParams.get('silent') === 'true';
+    return json(res, 200, { silent: pageSilent });
+  }
   if (path === '/signin') {
     signIn.leftover = !!cookie(req, 'oauth_token') || !!cookie(req, 'oauth_refresh_token');
     return html(res, SIGN_IN_PAGE);
@@ -254,19 +284,26 @@ const server = createServer(async (req, res) => {
     }
   }
 
-  if (path === '/__refuse-likes') { refuseLikes = true; return json(res, 200, {}); }
+  if (path === '/__refuse-next') { refuseNext = true; return json(res, 200, {}); }
+  // Stands in for someone clicking Like on the real page.
+  if (path === '/__click-like') {
+    const id = TRACKS.find((t) => t.title === url.searchParams.get('title')).id;
+    if (likes.has(id)) likes.delete(id);
+    else likes.add(id);
+    return json(res, 200, {});
+  }
   // Fails every other time, for the retry of a request that hit a bad moment.
   if (path === '/__flaky') { flaky = !flaky; return flaky ? json(res, 503, {}) : json(res, 200, { ok: true }); }
 
   if ((match = m(/^\/users\/(\d+)\/track_likes\/(\d+)$/))) {
     if (Number(match[1]) !== ME.id) return json(res, 403, {});
-    if (refuseLikes && req.method === 'PUT') { refuseLikes = false; return json(res, 403, { reason: 'mock refusal' }); }
     if (req.method === 'PUT') likes.add(Number(match[2]));
     else if (req.method === 'DELETE') likes.delete(Number(match[2]));
     else return json(res, 405, {});
     return json(res, 200, { status: 'ok' });
   }
   if ((match = m(/^\/me\/followings\/(\d+)$/))) {
+    if (refuseNext) { refuseNext = false; return json(res, 403, { reason: 'mock refusal' }); }
     if (req.method === 'POST') follows.add(Number(match[1]));
     else if (req.method === 'DELETE') follows.delete(Number(match[1]));
     else return json(res, 405, {});

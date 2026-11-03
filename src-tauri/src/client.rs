@@ -70,7 +70,6 @@ pub fn write_allowed(method: &str, path: &str) -> bool {
     let id = |s: &str| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit());
     let segments: Vec<&str> = path.split('/').collect();
     match (method, segments.as_slice()) {
-        ("PUT" | "DELETE", ["", "users", user, "track_likes", track]) => id(user) && id(track),
         ("POST" | "DELETE", ["", "me", "followings", user]) => id(user),
         ("POST", ["", "playlists"]) => true,
         ("PUT", ["", "playlists", playlist]) => id(playlist),
@@ -274,17 +273,14 @@ mod tests {
 
     #[test]
     fn writes_are_allowlisted() {
-        assert!(write_allowed("PUT", "/users/9/track_likes/1"));
-        assert!(write_allowed("DELETE", "/users/9/track_likes/1"));
         assert!(write_allowed("POST", "/me/followings/1"));
         assert!(write_allowed("DELETE", "/me/followings/1"));
         assert!(write_allowed("POST", "/playlists"));
         assert!(write_allowed("PUT", "/playlists/1"));
         assert!(!write_allowed("DELETE", "/playlists/1"));
         assert!(!write_allowed("DELETE", "/tracks/1"));
-        assert!(!write_allowed("PUT", "/users/9/track_likes/"));
-        assert!(!write_allowed("PUT", "/users/9/track_likes/1/../../tracks"));
-        assert!(!write_allowed("PUT", "/users/me/track_likes/1"));
+        assert!(!write_allowed("PUT", "/users/9/track_likes/1"));
+        assert!(!write_allowed("PUT", "/playlists/1/../../tracks"));
         assert!(!write_allowed("POST", "/me/followings/1?x=1"));
         assert!(!write_allowed("GET", "/me"));
     }

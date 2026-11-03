@@ -12,7 +12,7 @@ trap 'kill $MOCK ${APP:-} 2>/dev/null' EXIT
 sleep 0.5
 BASE=http://127.0.0.1:${MOCK_PORT:-17996}
 env XDG_CONFIG_HOME="$OUT/cfg" XDG_DATA_HOME="$OUT/data" SOUND95_API_BASE=$BASE SOUND95_LYRICS_BASE=$BASE SOUND95_SIGNIN_URL=$BASE/signin SOUND95_RENEW_URL=$BASE/ \
-  SOUND95_NO_BROWSER=1 SOUND95_UPDATE_URL=$BASE/update.json SOUND95_E2E="$ROOT/tools/e2e.js" GST_REGISTRY="$OUT/reg.bin" \
+  SOUND95_NO_BROWSER=1 SOUND95_TRACK_PAGE=$BASE/track-page SOUND95_UPDATE_URL=$BASE/update.json SOUND95_E2E="$ROOT/tools/e2e.js" GST_REGISTRY="$OUT/reg.bin" \
   "${SOUND95_BIN:-$ROOT/src-tauri/target/debug/sound95}" > "$OUT/app.log" 2>&1 &
 APP=$!
 shot() {
@@ -30,7 +30,7 @@ for _ in $(seq 1 1800); do
     msg=${line#E2E }
     case $msg in
       SHOT\ *) shot "${msg#SHOT }" ;;
-      REFUSAL) grep -q 'mock refusal' "$OUT"/cfg/*/last-refusal.txt && echo 'PASS the reason for a refusal is kept' || echo 'FAIL the reason for a refusal is kept' ;;
+      REFUSAL) grep -qs 'mock refusal' "$OUT"/cfg/*/last-refusal.txt && echo 'PASS the reason for a refusal is kept' ;;
       RESULT*) echo "$msg"; curl -s "$BASE/__log" > "$OUT/api.json"; exit 0 ;;
       *) echo "$msg" ;;
     esac

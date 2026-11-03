@@ -272,5 +272,5 @@ export default {
   "Show Sound95": "Sound95 anzeigen",
   "Quit": "Beenden",
   "SoundCloud refused this.": "SoundCloud hat die Anfrage abgelehnt.",
-  "SoundCloud would not accept this like from Sound95. You can still like the track on its SoundCloud page.": "SoundCloud hat dieses Like von Sound95 nicht angenommen. Du kannst den Track weiterhin auf seiner SoundCloud-Seite liken.",
+  "Click Like on the SoundCloud page.": "Klicke auf der SoundCloud-Seite auf „Gefällt mir“.",
 };

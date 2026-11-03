@@ -272,5 +272,5 @@ export default {
   "Show Sound95": "Показать Sound95",
   "Quit": "Выход",
   "SoundCloud refused this.": "SoundCloud отклонил запрос.",
-  "SoundCloud would not accept this like from Sound95. You can still like the track on its SoundCloud page.": "SoundCloud не принял лайк от Sound95. Вы всё ещё можете поставить его на странице трека в SoundCloud.",
+  "Click Like on the SoundCloud page.": "Нажмите «Нравится» на странице SoundCloud.",
 };

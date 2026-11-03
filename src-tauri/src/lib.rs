@@ -159,6 +159,21 @@ fn open_link(handle: tauri::AppHandle, url: String) -> Result<(), AppError> {
 }
 
 #[tauri::command]
+fn open_track_page(handle: AppHandle, link: String) -> Result<(), AppError> {
+    login::open_track_page(&handle, &link)
+}
+
+#[tauri::command]
+fn track_page_open(handle: AppHandle) -> bool {
+    login::track_page_open(&handle)
+}
+
+#[tauri::command]
+fn close_track_page(handle: AppHandle) {
+    login::close_track_page(&handle);
+}
+
+#[tauri::command]
 async fn lyrics_search(request: lyrics::Request) -> Result<Vec<lyrics::Lyrics>, AppError> {
     lyrics::search(request).await
 }
@@ -335,6 +350,9 @@ pub fn run() {
             api_get,
             api_send,
             open_link,
+            open_track_page,
+            track_page_open,
+            close_track_page,
             lyrics_search,
             waveform,
             visual_start,

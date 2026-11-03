@@ -45,6 +45,9 @@ built into the app is refused.
   words earlier and `]` later. If a song only has plain text, the timing is a guess, and **Tap to
   Sync** lets you fix it: press Space as each line starts and it's saved for that track.
   **Paste Lyrics** covers songs nobody has published words for.
+- **Likes.** The heart opens the track's SoundCloud page in a small window. Click Like there and
+  the heart updates and the window closes by itself. SoundCloud's bot check turns away likes sent
+  directly by apps, so they have to come from its own page.
 - **Any window size.** The layout folds down to fit a small window or a tiling tile.
 - **Settings.** File > Settings picks a light or dark theme and the language: English, Русский,
   Українська, Español, Deutsch or Français.
