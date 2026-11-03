@@ -265,4 +265,12 @@ export default {
   "Log in to search SoundCloud.": "Connectez-vous pour rechercher sur SoundCloud.",
   "Log in to SoundCloud to start listening.": "Connectez-vous à SoundCloud pour écouter de la musique.",
   "Log in to discover music.": "Connectez-vous pour découvrir de la musique.",
+  "Options": "Options",
+  "Keep running in the tray when I close the window": "Rester dans la zone de notification à la fermeture",
+  "Show what I am listening to in Discord": "Afficher dans Discord ce que j'écoute",
+  "Not available in this version.": "Non disponible dans cette version.",
+  "Show Sound95": "Afficher Sound95",
+  "Quit": "Quitter",
+  "SoundCloud refused this.": "SoundCloud a refusé la demande.",
+  "SoundCloud would not accept this like from Sound95. You can still like the track on its SoundCloud page.": "SoundCloud n'a pas accepté ce j'aime depuis Sound95. Vous pouvez toujours l'ajouter sur la page du titre sur SoundCloud.",
 };

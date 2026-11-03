@@ -61,5 +61,6 @@ export function errorText(e) {
   if (e?.code === 'rate_limited') {
     return e.retry_after ? tr('SoundCloud rate limit reached. Try again in {seconds}s.', { seconds: e.retry_after }) : e.message;
   }
+  if (e?.code === 'forbidden') return tr('SoundCloud refused this.');
   return e?.message || String(e);
 }

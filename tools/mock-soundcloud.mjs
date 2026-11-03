@@ -160,6 +160,9 @@ function lyricsRoute(path, url, res) {
   return false;
 }
 
+let refuseLikes = false;
+let flaky = false;
+
 const server = createServer(async (req, res) => {
   const url = new URL(req.url, ORIGIN);
   const path = decodeURIComponent(url.pathname);
@@ -251,8 +254,13 @@ const server = createServer(async (req, res) => {
     }
   }
 
+  if (path === '/__refuse-likes') { refuseLikes = true; return json(res, 200, {}); }
+  // Fails every other time, for the retry of a request that hit a bad moment.
+  if (path === '/__flaky') { flaky = !flaky; return flaky ? json(res, 503, {}) : json(res, 200, { ok: true }); }
+
   if ((match = m(/^\/users\/(\d+)\/track_likes\/(\d+)$/))) {
     if (Number(match[1]) !== ME.id) return json(res, 403, {});
+    if (refuseLikes && req.method === 'PUT') { refuseLikes = false; return json(res, 403, { reason: 'mock refusal' }); }
     if (req.method === 'PUT') likes.add(Number(match[2]));
     else if (req.method === 'DELETE') likes.delete(Number(match[2]));
     else return json(res, 405, {});

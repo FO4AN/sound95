@@ -265,4 +265,12 @@ export default {
   "Log in to search SoundCloud.": "Войдите, чтобы искать в SoundCloud.",
   "Log in to SoundCloud to start listening.": "Войдите в SoundCloud, чтобы слушать музыку.",
   "Log in to discover music.": "Войдите, чтобы открывать новую музыку.",
+  "Options": "Параметры",
+  "Keep running in the tray when I close the window": "Сворачивать в трей при закрытии окна",
+  "Show what I am listening to in Discord": "Показывать в Discord, что я слушаю",
+  "Not available in this version.": "Недоступно в этой версии.",
+  "Show Sound95": "Показать Sound95",
+  "Quit": "Выход",
+  "SoundCloud refused this.": "SoundCloud отклонил запрос.",
+  "SoundCloud would not accept this like from Sound95. You can still like the track on its SoundCloud page.": "SoundCloud не принял лайк от Sound95. Вы всё ещё можете поставить его на странице трека в SoundCloud.",
 };

@@ -30,6 +30,7 @@ for _ in $(seq 1 1800); do
     msg=${line#E2E }
     case $msg in
       SHOT\ *) shot "${msg#SHOT }" ;;
+      REFUSAL) grep -q 'mock refusal' "$OUT"/cfg/*/last-refusal.txt && echo 'PASS the reason for a refusal is kept' || echo 'FAIL the reason for a refusal is kept' ;;
       RESULT*) echo "$msg"; curl -s "$BASE/__log" > "$OUT/api.json"; exit 0 ;;
       *) echo "$msg" ;;
     esac

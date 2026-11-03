@@ -16,7 +16,9 @@
   const pass = (m) => log(`PASS ${m}`);
   const fail = (m) => { failures += 1; return log(`FAIL ${m}`); };
 
-  window.addEventListener('error', (e) => fail(`js error: ${e.message} at ${e.filename}:${e.lineno}`));
+  // SoundCloud's script throws when a late message arrives from a Widget that was replaced.
+  // Our own scripts report real details, so that's the only thing this wording can be.
+  window.addEventListener('error', (e) => e.message !== 'Script error.' && fail(`js error: ${e.message} at ${e.filename}:${e.lineno}`));
   window.addEventListener('unhandledrejection', (e) => fail(`rejection: ${e.reason?.message || JSON.stringify(e.reason)}`));
 
   const $ = (s) => document.querySelector(s);
@@ -256,6 +258,26 @@
       await log(`SHOT viz-${mode}`);
       await sleep(1000);
     }
+
+    // Closing leaves it playing in the tray, with the menu standing in for the window.
+    const appWindow = window.__TAURI__.window.getCurrentWindow();
+    const tray = (action) => window.__TAURI__.event.emit('sound95:tray', action);
+    await appWindow.close();
+    await check(async () => !(await appWindow.isVisible()), 'closing hides the window');
+    const hiddenAt = seconds();
+    await check(() => seconds() >= hiddenAt + 2, 'music keeps playing with the window closed', 8000);
+    await tray('toggle');
+    await check(() => $('#tp-play').getAttribute('aria-label') === 'Play', 'the tray menu pauses');
+    await tray('toggle');
+    await check(() => $('#tp-play').getAttribute('aria-label') === 'Pause', 'the tray menu resumes');
+    const playingBefore = $('#np-title').textContent;
+    await tray('next');
+    await check(() => $('#np-title').textContent !== playingBefore, 'the tray menu skips');
+    await tray('previous');
+    await check(() => $('#np-title').textContent === playingBefore || seconds() < 4, 'the tray menu goes back');
+    await appWindow.show();
+    await check(() => appWindow.isVisible(), 'the window comes back');
+    await sleep(300);
     $('#volume').value = 0;
     $('#volume').dispatchEvent(new Event('input'));
     $('#viz-toggle').click();
@@ -301,6 +323,15 @@
     await clickText('.dialog .menu-item', 'Boot Sector Ballads');
     await check(() => byText('#status', 'Added "'), 'add to playlist');
 
+    await invoke('api_get', { target: '/__refuse-likes' });
+    const heartBefore = $$('.row .heart')[6].innerHTML;
+    $$('.row .heart')[6].click();
+    await check(() => byText('.dialog p', 'SoundCloud would not accept'), 'a refused like explains itself');
+    await check(() => $('.dialog .refused-open') && $$('.row .heart')[6].innerHTML === heartBefore, 'a refused like offers its page and undoes the heart');
+    await clickText('.dialog button', 'OK');
+    await log('REFUSAL');
+    await check(async () => (await invoke('api_get', { target: '/__flaky' })).ok, 'a read that hits a bad moment is tried again');
+
     byText('.menu-title', 'Help').dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
     await clickText('.menu-item', 'About Sound95');
     await check(() => byText('.dialog .titlebar-text', 'About'), 'about dialog from the Help menu');
@@ -322,6 +353,7 @@
     };
     await openSettings('File', 'Settings');
     await check(() => theme() === 'light' && $$('.settings input')[0].checked, 'the light theme is the default');
+    await check(() => $$('.options input')[0].checked && !$$('.options input')[1].checked, 'closing to the tray is on and Discord is off by default');
     choose(1, 'ru');
     await check(() => $('.monitor.dark'), 'the monitor previews the theme');
     await log('SHOT settings');

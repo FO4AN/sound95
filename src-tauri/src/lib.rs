@@ -1,8 +1,10 @@
 mod audio;
 mod client;
+mod discord;
 mod login;
 mod lyrics;
 mod store;
+mod tray;
 mod update;
 mod visual;
 
@@ -10,10 +12,16 @@ use client::{AppError, Client};
 use reqwest::Method;
 use serde::Serialize;
 use serde_json::Value;
-use tauri::{AppHandle, Manager, State};
+use std::{
+    panic::{catch_unwind, AssertUnwindSafe},
+    time::Duration,
+};
+use tauri::{AppHandle, Manager, State, WindowEvent};
 use tauri_plugin_opener::OpenerExt;
 use tokio::sync::Mutex;
 use url::Url;
+
+const RETRY_AFTER: Duration = Duration::from_millis(600);
 
 struct App {
     client: Client,
@@ -92,15 +100,21 @@ async fn call(
     body: Option<Value>,
 ) -> Result<Value, AppError> {
     let sent = app.client.access_token().await?;
-    match app
-        .client
-        .request(method.clone(), url.clone(), body.clone())
-        .await
-    {
+    let attempt = || {
+        app.client
+            .request(method.clone(), url.clone(), body.clone())
+    };
+    let mut first = attempt().await;
+    // Only reads: a write that timed out may still have gone through.
+    if method == Method::GET && first.as_ref().is_err_and(AppError::is_transient) {
+        tokio::time::sleep(RETRY_AFTER).await;
+        first = attempt().await;
+    }
+    match first {
         Err(e) if e.code == "unauthorized" => renew(app, handle, &sent).await?,
         result => return result,
     }
-    match app.client.request(method, url, body).await {
+    match attempt().await {
         Err(e) if e.code == "unauthorized" => {
             app.client.logout().await?;
             Err(client::expired())
@@ -194,6 +208,41 @@ async fn audio_install() -> Result<(), AppError> {
         .map_err(|e| AppError::new("audio_install", e.to_string()))?
 }
 
+#[tauri::command]
+fn tray_update(handle: AppHandle, labels: tray::Labels) -> Result<(), AppError> {
+    let Some(tray) = handle.try_state::<tray::Tray>() else {
+        return Ok(());
+    };
+    tray.update(&labels)
+        .map_err(|e| AppError::new("tray", e.to_string()))
+}
+
+#[tauri::command]
+fn tray_closes_to(handle: AppHandle, closes: bool) {
+    if let Some(tray) = handle.try_state::<tray::Tray>() {
+        tray.set_closes_to_tray(closes);
+    }
+}
+
+#[tauri::command]
+fn discord_available() -> bool {
+    discord::Discord::available()
+}
+
+#[tauri::command]
+fn discord_update(
+    discord: State<'_, discord::Discord>,
+    enabled: bool,
+    playing: Option<discord::Playing>,
+) {
+    discord.update(enabled, playing);
+}
+
+#[tauri::command]
+fn quit(handle: AppHandle) {
+    handle.exit(0);
+}
+
 /// WebKit reads the GStreamer registry once at startup, so new plug-ins need a
 /// fresh process.
 #[tauri::command]
@@ -222,13 +271,33 @@ pub fn run() {
             }
         }
     });
+    // Starting Sound95 while it sits in the tray brings the window back. Not in
+    // debug builds, so tests can run next to a copy that's in use.
+    #[cfg(not(debug_assertions))]
+    let builder = builder.plugin(tauri_plugin_single_instance::init(|app, _, _| {
+        tray::show(app);
+    }));
     builder
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .on_window_event(|window, event| {
-            if window.label() == "main" && matches!(event, tauri::WindowEvent::Destroyed) {
-                login::close_all(window.app_handle());
-                window.state::<visual::Visual>().stop();
+            if window.label() != "main" {
+                return;
+            }
+            match event {
+                WindowEvent::CloseRequested { api, .. } => {
+                    let tray = window.try_state::<tray::Tray>();
+                    if tray.is_some_and(|tray| tray.closes_to_tray()) {
+                        api.prevent_close();
+                        let _ = window.hide();
+                    }
+                }
+                WindowEvent::Destroyed => {
+                    login::close_all(window.app_handle());
+                    window.state::<visual::Visual>().stop();
+                    window.state::<discord::Discord>().update(false, None);
+                }
+                _ => {}
             }
         })
         .setup(|app| {
@@ -240,6 +309,16 @@ pub fn run() {
             });
             app.manage(visual::Visual::default());
             app.manage(update::Pending::default());
+            app.manage(discord::Discord::default());
+            // On Linux this panics when the system has no tray library. Sound95 is
+            // fine without a tray, and closing the window then just quits.
+            match catch_unwind(AssertUnwindSafe(|| tray::build(app))) {
+                Ok(Ok(tray)) => {
+                    app.manage(tray);
+                }
+                Ok(Err(e)) => eprintln!("No tray icon: {e}"),
+                Err(_) => eprintln!("No tray icon: the tray library is missing"),
+            }
             // Not on Linux: a tiling compositor scales a window that wants more
             // than its tile, and the pointer stops lining up with the page.
             #[cfg(not(target_os = "linux"))]
@@ -264,6 +343,11 @@ pub fn run() {
             update_install,
             audio_status,
             audio_install,
+            tray_update,
+            tray_closes_to,
+            discord_available,
+            discord_update,
+            quit,
             relaunch
         ])
         .run(tauri::generate_context!())

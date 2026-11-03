@@ -48,6 +48,10 @@ built into the app is refused.
 - **Any window size.** The layout folds down to fit a small window or a tiling tile.
 - **Settings.** File > Settings picks a light or dark theme and the language: English, Русский,
   Українська, Español, Deutsch or Français.
+- **Discord.** Settings can show what you're listening to on your Discord profile. It's off until
+  you turn it on.
+- **Tray.** Closing the window keeps the music playing. Right click the tray icon to pause, skip
+  or go back, and use Quit or File > Exit to really leave. Settings can turn this off.
 
 ## Build
 

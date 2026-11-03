@@ -1,7 +1,7 @@
 // App shell: wires the window chrome, menus, player bar and session together.
 
 import { onLanguageChange, tr, translatePage } from './i18n.js';
-import { applyTheme, settingsDialog } from './settings.js';
+import { applyCloseToTray, applyTheme, settingsDialog } from './settings.js';
 import { api } from './api.js';
 import { clear, el, errorText, fmtTime, setStatus } from './dom.js';
 import { icon, setIcon } from './icons.js';
@@ -87,7 +87,7 @@ function menuDefinitions() {
         ? { label: tr('Log Off {name}...', { name: session.user.username }), action: logOff }
         : { label: tr('Log In...'), action: logOn },
       'sep',
-      { label: tr('Exit'), action: () => appWindow().close() },
+      { label: tr('Exit'), action: () => api.quit() },
     ],
     View: [
       { label: tr('Home'), checked: route?.name === 'home', action: () => go({ name: 'home' }) },
@@ -158,7 +158,7 @@ function openStartMenu() {
     session.user
       ? { label: tr('Log Off {name}...', { name: session.user.username }), icon: 'user', action: logOff }
       : { label: tr('Log In...'), icon: 'user', action: logOn },
-    { label: tr('Shut Down'), icon: 'close', action: () => appWindow().close() },
+    { label: tr('Shut Down'), icon: 'close', action: () => api.quit() },
   ];
   showMenu(items, rect.left, 0, {
     below: rect.top,
@@ -360,6 +360,34 @@ onSessionChange(() => {
 });
 onPlayerChange(renderPlayer);
 
+/* ---------- Tray ---------- */
+
+let trayShows = null;
+
+function renderTray() {
+  const track = player.current;
+  const labels = {
+    now: track ? `${track.artist} - ${track.title}` : tr('Nothing playing'),
+    hasTrack: !!track,
+    toggle: player.playing ? tr('Pause') : tr('Play'),
+    next: tr('Next'),
+    previous: tr('Previous'),
+    show: tr('Show Sound95'),
+    quit: tr('Quit'),
+  };
+  const shows = JSON.stringify(labels);
+  if (shows === trayShows) return;
+  trayShows = shows;
+  api.trayUpdate(labels).catch(() => { trayShows = null; });
+}
+onPlayerChange(renderTray);
+
+window.__TAURI__.event.listen('sound95:tray', ({ payload }) => {
+  if (payload === 'toggle') togglePlay();
+  if (payload === 'next') next();
+  if (payload === 'previous') prev();
+});
+
 /* ---------- Keyboard, misc ---------- */
 
 document.addEventListener('keydown', (e) => {
@@ -421,6 +449,7 @@ async function ensureAudio() {
 
 // Windows and open pages are built in one language, so they get rebuilt in the new one.
 onLanguageChange(() => {
+  renderTray();
   renderMenubar();
   renderSidebar();
   renderAccount();
@@ -431,9 +460,28 @@ onLanguageChange(() => {
   }
 });
 
+const RECONNECT_MS = 10_000;
+
+/** Sound95 started without a connection: the session comes back when the network does. */
+function reconnect(reason) {
+  setStatus(errorText(reason), { sticky: true });
+  setTimeout(async () => {
+    try {
+      await loadSession();
+      setStatus(tr('Ready'));
+      go({ name: 'home' });
+    } catch (e) {
+      if (e?.code === 'session_expired') await logOn();
+      else reconnect(e);
+    }
+  }, RECONNECT_MS);
+}
+
 async function boot() {
   applyTheme();
   translatePage();
+  applyCloseToTray().catch(() => {});
+  renderTray();
   const savedQueue = localStorage.getItem('sound95.queue');
   const narrow = window.matchMedia('(max-width: 1000px)').matches;
   if (savedQueue === '0' || (narrow && savedQueue === null)) $('workspace').classList.add('no-queue');
@@ -460,7 +508,7 @@ async function boot() {
   } catch (e) {
     go({ name: 'home' });
     if (e?.code === 'session_expired') await logOn();
-    else setStatus(errorText(e), { sticky: true });
+    else reconnect(e);
   }
 }
 

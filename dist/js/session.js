@@ -2,7 +2,8 @@
 
 import { tr } from './i18n.js';
 import { api, normalizePlaylist, page, paths, setMe, trackUrn } from './api.js';
-import { errorText, setStatus } from './dom.js';
+import { el, errorText, setStatus } from './dom.js';
+import { message } from './dialogs.js';
 
 export const session = {
   user: null,
@@ -45,11 +46,22 @@ export function isLiked(track) {
   return session.liked.has(track.urn);
 }
 
+const liking = new Set(); // a quick second click would race the first
+
+function likeRefused(track) {
+  return message(tr('Like'), tr('SoundCloud would not accept this like from Sound95. You can still like the track on its SoundCloud page.'), {
+    kind: 'warn',
+    extra: track.link ? el('button', { class: 'refused-open', onClick: () => api.open(track.link) }, tr('Open on SoundCloud')) : null,
+  });
+}
+
 export async function toggleLike(track) {
   if (!session.user) {
     setStatus(tr('Log in to like tracks.'));
     return;
   }
+  if (liking.has(track.urn)) return;
+  liking.add(track.urn);
   const was = isLiked(track);
   const apply = (liked) => {
     if (liked) { session.liked.add(track.urn); session.unliked.delete(track.urn); }
@@ -63,5 +75,8 @@ export async function toggleLike(track) {
   } catch (e) {
     apply(was);
     setStatus(errorText(e));
+    if (e?.code === 'forbidden') likeRefused(track);
+  } finally {
+    liking.delete(track.urn);
   }
 }

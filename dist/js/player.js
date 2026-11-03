@@ -8,6 +8,7 @@ const STORE_KEY = 'sound95.player';
 const MAX_SKIPS = 3;
 const START_TIMEOUT_MS = 15000;
 const PROGRESS_EVERY_MS = 200; // the Widget reports far more often than the bar can show
+const WIDGET_API = 'https://w.soundcloud.com/player/api.js';
 const slot = () => document.getElementById('widget-slot');
 
 export const player = {
@@ -57,8 +58,8 @@ export function restorePlayer() {
   try {
     const saved = JSON.parse(localStorage.getItem(STORE_KEY) || 'null');
     if (saved) {
-      player.queue = Array.isArray(saved.queue) ? saved.queue : [];
-      player.index = player.queue.length ? saved.index ?? -1 : -1;
+      player.queue = Array.isArray(saved.queue) ? saved.queue.filter((t) => t?.urn) : [];
+      player.index = Math.min(Number.isInteger(saved.index) ? saved.index : -1, player.queue.length - 1);
       player.shuffle = !!saved.shuffle;
       player.repeat = ['off', 'all', 'one'].includes(saved.repeat) ? saved.repeat : 'off';
       if (typeof saved.volume === 'number') volume = saved.volume;
@@ -100,6 +101,13 @@ function started(mine) {
   emit();
 }
 
+/** A Widget that stopped answering stays that way, so the next track gets a new one. */
+function dropWidget() {
+  widget = null;
+  frame = null;
+  slot().replaceChildren();
+}
+
 function failed(track) {
   clearTimeout(startTimer);
   player.loading = false;
@@ -114,9 +122,25 @@ function failed(track) {
   emit();
 }
 
+/** The page's own copy never arrives if Sound95 starts without a connection. */
+function fetchWidgetApi() {
+  return new Promise((done, fail) => {
+    const script = document.createElement('script');
+    script.src = WIDGET_API;
+    script.onload = done;
+    script.onerror = fail;
+    document.head.append(script);
+  });
+}
+
 function createWidget(track) {
   if (!window.SC?.Widget) {
-    failed(track);
+    const mine = generation;
+    const give = () => { if (mine === generation) failed(track); };
+    fetchWidgetApi().then(() => {
+      if (window.SC?.Widget && mine === generation) createWidget(track);
+      else give();
+    }, give);
     return;
   }
   const params = new URLSearchParams({ url: trackUrl(track), ...WIDGET_OPTIONS });
@@ -125,34 +149,37 @@ function createWidget(track) {
   frame.allow = 'autoplay';
   frame.src = `https://w.soundcloud.com/player/?${params}`;
   slot().replaceChildren(frame);
-  widget = window.SC.Widget(frame);
+  const own = window.SC.Widget(frame);
+  widget = own;
   const { Events } = window.SC.Widget;
-  widget.bind(Events.READY, () => {
-    widget.setVolume(Math.round(volume * 100));
-    widget.play();
+  // A dropped Widget can still have events on their way.
+  const bind = (event, fn) => own.bind(event, (e) => { if (own === widget) fn(e); });
+  bind(Events.READY, () => {
+    own.setVolume(Math.round(volume * 100));
+    own.play();
   });
-  widget.bind(Events.PLAY, () => {
+  bind(Events.PLAY, () => {
     player.playing = true;
     setPosition(position);
     if (player.loading) started(generation);
     else notify();
   });
-  widget.bind(Events.PAUSE, () => {
+  bind(Events.PAUSE, () => {
     setPosition(livePositionMs());
     player.playing = false;
     notify();
   });
-  widget.bind(Events.PLAY_PROGRESS, (e) => {
+  bind(Events.PLAY_PROGRESS, (e) => {
     setPosition(e.currentPosition);
     if (positionAt - progressAt < PROGRESS_EVERY_MS) return;
     progressAt = positionAt;
     progressListeners.forEach((fn) => fn());
   });
-  widget.bind(Events.FINISH, () => {
+  bind(Events.FINISH, () => {
     player.playing = false;
     next({ auto: true });
   });
-  widget.bind(Events.ERROR, () => { if (player.current) failed(player.current); });
+  bind(Events.ERROR, () => { if (player.current) failed(player.current); });
 }
 
 function load(track) {
@@ -164,17 +191,22 @@ function load(track) {
   emit();
   setStatus(tr('Opening "{title}"...', { title: track.title }), { sticky: true });
   clearTimeout(startTimer);
-  startTimer = setTimeout(() => { if (mine === generation && player.loading) failed(track); }, START_TIMEOUT_MS);
+  startTimer = setTimeout(() => {
+    if (mine !== generation || !player.loading) return;
+    dropWidget();
+    failed(track);
+  }, START_TIMEOUT_MS);
   if (!widget) {
     createWidget(track);
     return;
   }
-  widget.load(trackUrl(track), {
+  const own = widget;
+  own.load(trackUrl(track), {
     ...WIDGET_OPTIONS,
     callback: () => {
-      if (mine !== generation) return;
-      widget.setVolume(Math.round(volume * 100));
-      widget.play();
+      if (mine !== generation || own !== widget) return;
+      own.setVolume(Math.round(volume * 100));
+      own.play();
     },
   });
 }
@@ -216,6 +248,7 @@ export function enqueue(track, { nextUp = false } = {}) {
 export function jumpTo(index) {
   if (index < 0 || index >= player.queue.length) return;
   player.index = index;
+  skips = 0;
   load(player.current);
 }
 
@@ -275,12 +308,14 @@ export function seekTo(ratio) {
   if (!widget || !duration) return;
   setPosition(duration * ratio);
   widget.seekTo(position);
+  notify();
 }
 
 export function seekToMs(ms) {
   if (!widget) return;
   setPosition(Math.max(0, ms));
   widget.seekTo(position);
+  notify();
 }
 
 export const durationMs = () => duration || player.current?.duration || 0;

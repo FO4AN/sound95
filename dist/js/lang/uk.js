@@ -265,4 +265,12 @@ export default {
   "Log in to search SoundCloud.": "Увійдіть, щоб шукати в SoundCloud.",
   "Log in to SoundCloud to start listening.": "Увійдіть у SoundCloud, щоб слухати музику.",
   "Log in to discover music.": "Увійдіть, щоб відкривати нову музику.",
+  "Options": "Параметри",
+  "Keep running in the tray when I close the window": "Згортати в трей під час закриття вікна",
+  "Show what I am listening to in Discord": "Показувати в Discord, що я слухаю",
+  "Not available in this version.": "Недоступно в цій версії.",
+  "Show Sound95": "Показати Sound95",
+  "Quit": "Вийти",
+  "SoundCloud refused this.": "SoundCloud відхилив запит.",
+  "SoundCloud would not accept this like from Sound95. You can still like the track on its SoundCloud page.": "SoundCloud не прийняв вподобання від Sound95. Ви все ще можете вподобати трек на його сторінці в SoundCloud.",
 };

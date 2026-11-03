@@ -265,4 +265,12 @@ export default {
   "Log in to search SoundCloud.": "Zum Suchen bei SoundCloud anmelden.",
   "Log in to SoundCloud to start listening.": "Zum Hören bei SoundCloud anmelden.",
   "Log in to discover music.": "Zum Entdecken von Musik anmelden.",
+  "Options": "Optionen",
+  "Keep running in the tray when I close the window": "Beim Schließen im Infobereich weiterlaufen",
+  "Show what I am listening to in Discord": "In Discord zeigen, was ich höre",
+  "Not available in this version.": "In dieser Version nicht verfügbar.",
+  "Show Sound95": "Sound95 anzeigen",
+  "Quit": "Beenden",
+  "SoundCloud refused this.": "SoundCloud hat die Anfrage abgelehnt.",
+  "SoundCloud would not accept this like from Sound95. You can still like the track on its SoundCloud page.": "SoundCloud hat dieses Like von Sound95 nicht angenommen. Du kannst den Track weiterhin auf seiner SoundCloud-Seite liken.",
 };

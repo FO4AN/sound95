@@ -24,6 +24,11 @@ impl AppError {
             retry_after: None,
         }
     }
+
+    /// Worth one more try: the request may never have reached SoundCloud.
+    pub fn is_transient(&self) -> bool {
+        matches!(self.code, "network" | "server")
+    }
 }
 
 fn net_err(e: reqwest::Error) -> AppError {
@@ -50,6 +55,8 @@ fn api_base() -> String {
 }
 
 const WAVE_HOST: &str = "wave.sndcdn.com";
+const REFUSAL_FILE: &str = "last-refusal.txt";
+const LONGEST_REFUSAL: usize = 600;
 
 pub struct Client {
     pub http: reqwest::Client,
@@ -173,7 +180,7 @@ impl Client {
         let token = self.access_token().await?;
         let mut req = self
             .http
-            .request(method, url)
+            .request(method.clone(), url.clone())
             .header(header::AUTHORIZATION, format!("OAuth {token}"))
             .header(header::ACCEPT, "application/json; charset=utf-8")
             .timeout(Duration::from_secs(20));
@@ -195,10 +202,17 @@ impl Client {
             err.retry_after = retry_after;
             return Err(err);
         }
+        if status == StatusCode::FORBIDDEN {
+            self.note_refusal(&method, &url, resp).await;
+            return Err(AppError::new(
+                "forbidden",
+                format!("SoundCloud returned {status}"),
+            ));
+        }
         if !status.is_success() {
             let code = match status {
                 StatusCode::NOT_FOUND => "not_found",
-                StatusCode::FORBIDDEN => "forbidden",
+                s if s.is_server_error() => "server",
                 _ => "http",
             };
             return Err(AppError::new(code, format!("SoundCloud returned {status}")));
@@ -209,6 +223,23 @@ impl Client {
         }
         serde_json::from_slice(&bytes)
             .map_err(|e| AppError::new("http", format!("Unreadable response: {e}")))
+    }
+
+    /// Keeps SoundCloud's reason for a 403 where it can be read later. Only what
+    /// came back, so the session never ends up in this file.
+    async fn note_refusal(&self, method: &Method, url: &Url, resp: reqwest::Response) {
+        let names: Vec<String> = resp.headers().keys().map(ToString::to_string).collect();
+        let body = resp.bytes().await.unwrap_or_default();
+        let text: String = String::from_utf8_lossy(&body)
+            .chars()
+            .take(LONGEST_REFUSAL)
+            .collect();
+        let note = format!(
+            "{method} {}\nheaders: {}\n\n{text}\n",
+            url.path(),
+            names.join(", ")
+        );
+        let _ = std::fs::write(self.path.with_file_name(REFUSAL_FILE), note);
     }
 
     pub async fn logout(&self) -> Result<(), AppError> {

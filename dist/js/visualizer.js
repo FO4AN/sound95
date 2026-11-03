@@ -70,8 +70,10 @@ function applyHeardFrames(now) {
 /** How far the sound you hear runs behind the sound being played. */
 export const outputDelayMs = () => audio.outputMs;
 
+document.addEventListener('visibilitychange', () => syncCapture());
+
 function syncCapture() {
-  const want = surfaces.size > 0 && player.playing;
+  const want = surfaces.size > 0 && player.playing && !document.hidden;
   if (want) {
     clearTimeout(stopTimer);
     stopTimer = null;
