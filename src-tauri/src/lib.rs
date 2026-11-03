@@ -158,8 +158,9 @@ fn open_link(handle: tauri::AppHandle, url: String) -> Result<(), AppError> {
     open_https(&handle, &url)
 }
 
+// Async, because creating a window in a synchronous command deadlocks on Windows.
 #[tauri::command]
-fn open_track_page(handle: AppHandle, link: String) -> Result<(), AppError> {
+async fn open_track_page(handle: AppHandle, link: String) -> Result<(), AppError> {
     login::open_track_page(&handle, &link)
 }
 

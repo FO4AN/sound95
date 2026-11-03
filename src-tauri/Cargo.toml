@@ -1,6 +1,6 @@
 [package]
 name = "sound95"
-version = "0.5.2"
+version = "0.5.3"
 description = "Sound95 - a Windows 95 style SoundCloud client"
 authors = ["Flint"]
 edition = "2021"
