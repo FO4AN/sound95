@@ -34,6 +34,8 @@ function emit() {
 let volume = 0.8;
 let widget = null;
 let frame = null;
+let listening = true; // false from load() until the reloaded Widget is ready
+let pendingSeek = null; // ms to start from once the track plays
 let position = 0;
 let positionAt = 0;
 let progressAt = 0;
@@ -90,14 +92,163 @@ function setPosition(ms) {
   positionAt = performance.now();
 }
 
+/* ---------- Where the music is ---------- */
+
+// The Widget reports where the music is several times a second. A report arrives late
+// by however long the pages were busy, and that only ever makes it look older, so the
+// freshest-looking report of the last two seconds sets the clock. While the Widget
+// repeats one position (seeking, buffering, starting up, or on Bluetooth until the
+// speaker catches up) the clock holds still rather than running on and snapping back.
+const CLOCK_WINDOW_MS = 2000;
+const JUMP_MS = 400; // further out than this, the music itself moved
+const SEEK_SETTLE_MS = 2000; // how long reports sent before a seek can trail in
+const SEEK_SLACK_MS = 250;
+const SLEW_MS = 200; // small errors fade out over about this long
+const MAX_RUN_ON_MS = 3000; // the longest the clock runs on without reports
+
+const clock = {
+  moving: false, // the latest reports advanced with the time between them
+  p: 0, // the latest report's position
+  at: 0, // and when it arrived
+  recent: [], // { lead: position - arrival, at } for reports while moving
+  lead: 0, // the largest lead in `recent`
+  gap: 100, // the usual time between reports
+  gaps: 0, // how many went into it, up to a few
+  reportAt: -Infinity, // when the latest report arrived
+  seekTarget: null,
+  seekAt: 0,
+  shown: 0, // the steady reading, which never steps back on its own
+  shownAt: 0,
+  snap: true, // the next steady reading jumps straight to the clock
+  release: false, // the music just started moving, so a frozen reading may jump ahead
+};
+
+/**
+ * The music is at `ms` and not moving. `snap` is for a jump (a new track, a seek), which
+ * readers show at once; `seek` also waits out the reports already on their way.
+ */
+function holdClock(ms, { snap = false, seek = false } = {}) {
+  clock.moving = false;
+  clock.release = false;
+  clock.p = ms;
+  clock.at = performance.now();
+  clock.recent = [];
+  if (snap) {
+    clock.snap = true;
+    clock.seekTarget = seek ? ms : null;
+    clock.seekAt = clock.at;
+  }
+}
+
+/** True for a report sent before the latest seek: after it, the music can't be far off. */
+function beforeSeek(p, now = performance.now()) {
+  if (clock.seekTarget == null) return false;
+  const since = now - clock.seekAt;
+  const off = p < clock.seekTarget - SEEK_SLACK_MS || p > clock.seekTarget + since + SEEK_SLACK_MS;
+  if (off && since < SEEK_SETTLE_MS) return true;
+  clock.seekTarget = null;
+  return false;
+}
+
+/** Takes in a position report. False if it was sent before the latest seek. */
+function reportClock(p) {
+  const now = performance.now();
+  if (beforeSeek(p, now)) return false;
+  // Reports keep coming at their pace while the music holds, so every one counts here.
+  if (now - clock.reportAt < 2000) {
+    clock.gaps = Math.min(clock.gaps + 1, 5);
+    clock.gap += (now - clock.reportAt - clock.gap) / clock.gaps;
+  }
+  clock.reportAt = now;
+  const dp = p - clock.p;
+  const dt = now - clock.at;
+  if (dp < -JUMP_MS || dp > dt + JUMP_MS) {
+    // The music jumped: a repeat, or a seek from elsewhere.
+    holdClock(p, { snap: true });
+    return true;
+  }
+  if (dp < Math.max(5, 0.25 * dt)) {
+    // WebKit repeats the same position while it seeks or waits for sound.
+    holdClock(p);
+    return true;
+  }
+  const lead = p - now;
+  if (!clock.moving || lead < clock.lead - JUMP_MS) {
+    // Moving again, or moving on after a stall the reports didn't show: start afresh.
+    clock.release = !clock.moving;
+    clock.moving = true;
+    clock.recent = [];
+  }
+  clock.recent.push({ lead, at: now });
+  while (clock.recent[0].at < now - CLOCK_WINDOW_MS) clock.recent.shift();
+  clock.lead = Math.max(...clock.recent.map((r) => r.lead));
+  clock.p = p;
+  clock.at = now;
+  return true;
+}
+
+function clockAt(at) {
+  if (!player.playing || !clock.moving) return clock.p;
+  // When reports stop coming, so does the clock, a little after the next one was due.
+  const until = clock.at + Math.min(MAX_RUN_ON_MS, Math.max(250, 2.5 * clock.gap));
+  return clock.lead + Math.min(at, until);
+}
+
+/** Where the music is at `at` (a performance.now() time), as well as it is known. */
+export function livePositionMs(at = performance.now()) {
+  const ms = Math.max(0, clockAt(at));
+  return durationMs() ? Math.min(ms, durationMs()) : ms;
+}
+
+/**
+ * livePositionMs for one reader that draws every frame, like karaoke. It never steps
+ * back unless the music jumped, waits when it got ahead, and fades small corrections in
+ * by running a little fast or slow, so a word wipe never stutters.
+ */
+export function steadyPositionMs(at = performance.now()) {
+  const target = livePositionMs(at);
+  const dt = Math.max(0, at - clock.shownAt);
+  const { shown } = clock;
+  clock.shownAt = at;
+  // Jumps come flagged; being ahead unflagged means the clock ran on through a stall.
+  if (clock.snap || target - shown > JUMP_MS || shown - target > MAX_RUN_ON_MS) {
+    clock.shown = target;
+    clock.snap = false;
+    clock.release = false;
+  } else if (clock.release && target > shown) {
+    clock.shown = target;
+    clock.release = false;
+  } else if (!player.playing || !clock.moving) {
+    clock.shown = Math.max(shown, Math.min(target, shown + dt));
+  } else {
+    const free = shown + dt;
+    clock.shown = free + Math.min(0.5 * dt, Math.max(-dt, ((target - free) * dt) / SLEW_MS));
+  }
+  return clock.shown;
+}
+
+/* ---------- The Widget ---------- */
+
+function seekWidget(ms) {
+  setPosition(Math.max(0, ms));
+  holdClock(position, { snap: true, seek: true });
+  widget.seekTo(position);
+}
+
 function started(mine) {
   if (mine !== generation) return;
   clearTimeout(startTimer);
   player.loading = false;
   skips = 0;
   const track = player.current;
-  setStatus(tr('Now playing: {track}', { track: `${track.artist} - ${track.title}` }));
+  if (track) setStatus(tr('Now playing: {track}', { track: `${track.artist} - ${track.title}` }));
   widget.getDuration((ms) => { if (mine === generation && ms) duration = ms; });
+  // The Widget only seeks once the sound is playing.
+  if (pendingSeek != null) {
+    const ms = pendingSeek;
+    pendingSeek = null;
+    seekWidget(ms);
+  }
   emit();
 }
 
@@ -133,6 +284,12 @@ function fetchWidgetApi() {
   });
 }
 
+/** The position an event carries, unless it is missing or older than a seek or a start point. */
+function eventPosition(e) {
+  const p = e?.currentPosition;
+  return Number.isFinite(p) && pendingSeek == null && !beforeSeek(p) ? p : null;
+}
+
 function createWidget(track) {
   if (!window.SC?.Widget) {
     const mine = generation;
@@ -151,26 +308,35 @@ function createWidget(track) {
   slot().replaceChildren(frame);
   const own = window.SC.Widget(frame);
   widget = own;
+  listening = true;
   const { Events } = window.SC.Widget;
-  // A dropped Widget can still have events on their way.
-  const bind = (event, fn) => own.bind(event, (e) => { if (own === widget) fn(e); });
+  // A dropped Widget can still have events on their way, and load() reloads the
+  // Widget's page, whose old copy keeps playing and reporting until it is gone.
+  const bind = (event, fn) => own.bind(event, (e) => { if (own === widget && listening) fn(e); });
   bind(Events.READY, () => {
     own.setVolume(Math.round(volume * 100));
     own.play();
   });
-  bind(Events.PLAY, () => {
+  bind(Events.PLAY, (e) => {
+    const p = eventPosition(e);
+    if (p != null) setPosition(p);
+    // Sound can lag the event, so the clock waits for reports that move.
+    holdClock(p ?? clock.p);
     player.playing = true;
-    setPosition(position);
     if (player.loading) started(generation);
     else notify();
   });
-  bind(Events.PAUSE, () => {
-    setPosition(livePositionMs());
+  bind(Events.PAUSE, (e) => {
+    const p = eventPosition(e) ?? livePositionMs();
+    setPosition(p);
+    holdClock(p);
     player.playing = false;
     notify();
   });
   bind(Events.PLAY_PROGRESS, (e) => {
-    setPosition(e.currentPosition);
+    const p = e?.currentPosition;
+    if (!Number.isFinite(p) || pendingSeek != null || !reportClock(p)) return;
+    setPosition(p);
     if (positionAt - progressAt < PROGRESS_EVERY_MS) return;
     progressAt = positionAt;
     progressListeners.forEach((fn) => fn());
@@ -182,11 +348,15 @@ function createWidget(track) {
   bind(Events.ERROR, () => { if (player.current) failed(player.current); });
 }
 
-function load(track) {
+/** Plays `track`, from `start` ms if given. */
+function load(track, start = null) {
+  if (!track) return;
   const mine = ++generation;
   player.loading = true;
   player.playing = false;
-  setPosition(0);
+  pendingSeek = start;
+  setPosition(start ?? 0);
+  holdClock(position, { snap: true });
   duration = track.duration || 0;
   emit();
   setStatus(tr('Opening "{title}"...', { title: track.title }), { sticky: true });
@@ -201,23 +371,31 @@ function load(track) {
     return;
   }
   const own = widget;
+  listening = false;
   own.load(trackUrl(track), {
     ...WIDGET_OPTIONS,
     callback: () => {
       if (mine !== generation || own !== widget) return;
+      listening = true;
       own.setVolume(Math.round(volume * 100));
       own.play();
     },
   });
 }
 
-export function playList(tracks, index) {
-  player.queue = tracks.filter((t) => t.access !== 'blocked');
+/** Plays `tracks` from `index`, and from `start` ms into that track if given. */
+export function playList(tracks, index, start = null) {
+  const queue = tracks.filter((t) => t.access !== 'blocked');
   const wanted = tracks[index];
-  player.index = Math.max(0, player.queue.findIndex((t) => t.urn === wanted?.urn));
+  if (!queue.length) {
+    setStatus(tr('Could not play "{title}".', { title: wanted?.title ?? '' }));
+    return;
+  }
+  player.queue = queue;
+  player.index = Math.max(0, queue.findIndex((t) => t.urn === wanted?.urn));
   if (player.shuffle) shuffleRest();
   skips = 0;
-  load(player.current);
+  load(player.current, player.current.urn === wanted?.urn ? start : null);
 }
 
 function shuffleRest() {
@@ -261,13 +439,16 @@ export function clearUpcoming() {
 export function togglePlay() {
   const track = player.current;
   if (!track) return;
-  if (!widget) load(track);
+  if (!widget) load(track, pendingSeek);
   else widget.toggle();
 }
 
 export function next({ auto = false } = {}) {
   if (!player.queue.length) return;
-  if (auto && player.repeat === 'one') {
+  if (auto && player.repeat === 'one' && widget) {
+    // Not seekToMs: its notify would show a stop between the end and the restart.
+    setPosition(0);
+    holdClock(0, { snap: true, seek: true });
     widget.seekTo(0);
     widget.play();
     return;
@@ -286,7 +467,7 @@ export function next({ auto = false } = {}) {
 
 export function prev() {
   if (position > 3000 || player.index <= 0) {
-    widget?.seekTo(0);
+    seekToMs(0);
     return;
   }
   player.index -= 1;
@@ -305,28 +486,25 @@ export function cycleRepeat() {
 }
 
 export function seekTo(ratio) {
-  if (!widget || !duration) return;
-  setPosition(duration * ratio);
-  widget.seekTo(position);
-  notify();
+  if (durationMs()) seekToMs(durationMs() * ratio);
 }
 
 export function seekToMs(ms) {
-  if (!widget) return;
-  setPosition(Math.max(0, ms));
-  widget.seekTo(position);
+  if (!player.current) return;
+  const at = Math.max(0, ms);
+  if (widget && !player.loading) {
+    seekWidget(at);
+  } else {
+    // Nothing is playing yet (just restored, or still opening): start from here.
+    pendingSeek = at;
+    setPosition(at);
+    holdClock(at, { snap: true });
+  }
   notify();
 }
 
 export const durationMs = () => duration || player.current?.duration || 0;
 export const positionMs = () => position;
-
-/** The Widget reports a few times a second, which is too coarse for karaoke. */
-export function livePositionMs() {
-  if (!player.playing) return position;
-  const moved = position + performance.now() - positionAt;
-  return durationMs() ? Math.min(moved, durationMs()) : moved;
-}
 
 export function setVolume(v) {
   volume = Math.min(1, Math.max(0, v));
