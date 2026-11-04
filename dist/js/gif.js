@@ -69,6 +69,8 @@ export function decodeFrame(frame) {
   const count = frame.width * frame.height;
   const out = new Uint8Array(count);
   const { data, minCode } = frame;
+  // Codes are at most 12 bits, so a bigger start is corrupt (and would take seconds to set up).
+  if (minCode > 11) return out;
   const clear = 1 << minCode;
   const end = clear + 1;
   const prefix = new Uint16Array(4096);
@@ -108,9 +110,12 @@ export function decodeFrame(frame) {
       first = code;
       continue;
     }
+    // A code past the table means the data is corrupt. Following it could make an
+    // entry its own prefix and loop forever, so end the frame as browsers do.
+    if (code > next) break;
     const read = code;
     let top = 0;
-    if (code >= next) {
+    if (code === next) {
       stack[top++] = first;
       code = old;
     }
