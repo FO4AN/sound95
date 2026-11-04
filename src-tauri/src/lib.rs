@@ -16,6 +16,7 @@ use std::{
     panic::{catch_unwind, AssertUnwindSafe},
     time::Duration,
 };
+use store::Token;
 use tauri::{AppHandle, Manager, State, WindowEvent};
 use tauri_plugin_opener::OpenerExt;
 use tokio::sync::Mutex;
@@ -27,6 +28,37 @@ struct App {
     client: Client,
     /// Requests fail together when a session expires, but one renewal will do.
     renewing: Mutex<()>,
+    /// Held to check the stored session and change it in one step, so a renewal
+    /// that finishes late can't undo a Log Off.
+    changing: Mutex<()>,
+}
+
+impl App {
+    fn new(client: Client) -> Self {
+        Self {
+            client,
+            renewing: Mutex::new(()),
+            changing: Mutex::new(()),
+        }
+    }
+
+    /// Replaces the stored session only if it's still `expected`. False means
+    /// something else changed it first.
+    async fn replace_session(
+        &self,
+        expected: &str,
+        token: Option<Token>,
+    ) -> Result<bool, AppError> {
+        let _changing = self.changing.lock().await;
+        if self.client.access_token().await.ok().as_deref() != Some(expected) {
+            return Ok(false);
+        }
+        match token {
+            Some(token) => self.client.set_session(token).await?,
+            None => self.client.logout().await?,
+        }
+        Ok(true)
+    }
 }
 
 #[derive(Serialize)]
@@ -61,6 +93,7 @@ async fn status(app: State<'_, App>) -> Result<Status, AppError> {
 #[tauri::command]
 async fn login(app: State<'_, App>, handle: tauri::AppHandle) -> Result<(), AppError> {
     let token = login::sign_in(&handle).await?;
+    let _changing = app.changing.lock().await;
     app.client.set_session(token).await
 }
 
@@ -71,7 +104,11 @@ fn cancel_login(handle: tauri::AppHandle) {
 
 #[tauri::command]
 async fn logout(app: State<'_, App>, handle: tauri::AppHandle) -> Result<(), AppError> {
+    // The hidden renewal goes first, or a page it's still loading could set
+    // the cookies again after they're cleared.
+    login::close_all(&handle);
     login::forget(&handle);
+    let _changing = app.changing.lock().await;
     app.client.logout().await
 }
 
@@ -80,15 +117,18 @@ async fn renew(app: &App, handle: &AppHandle, rejected: &str) -> Result<(), AppE
     if app.client.access_token().await? != rejected {
         return Ok(());
     }
-    match login::renew(handle, rejected).await {
-        Some(token) => app.client.set_session(token).await,
-        // Quitting during a renewal shouldn't cost the login.
-        None if handle.get_webview_window("main").is_none() => Err(client::expired()),
-        None => {
-            app.client.logout().await?;
-            Err(client::expired())
-        }
+    let renewed = login::renew(handle, rejected).await;
+    // Quitting during a renewal shouldn't cost the login.
+    if renewed.is_none() && handle.get_webview_window("main").is_none() {
+        return Err(client::expired());
     }
+    // A Log Off or a new sign-in while this ran wins, and the caller then
+    // tries again with whatever is stored now.
+    let expired = renewed.is_none();
+    if app.replace_session(rejected, renewed).await? && expired {
+        return Err(client::expired());
+    }
+    Ok(())
 }
 
 /// Sends a request, renewing the session once if SoundCloud turns it down.
@@ -114,9 +154,10 @@ async fn call(
         Err(e) if e.code == "unauthorized" => renew(app, handle, &sent).await?,
         result => return result,
     }
+    let renewed = app.client.access_token().await?;
     match attempt().await {
         Err(e) if e.code == "unauthorized" => {
-            app.client.logout().await?;
+            app.replace_session(&renewed, None).await?;
             Err(client::expired())
         }
         result => result,
@@ -319,10 +360,7 @@ pub fn run() {
         .setup(|app| {
             let dir = app.path().app_config_dir()?;
             let client = Client::new(dir.join("session.json"));
-            app.manage(App {
-                client,
-                renewing: Mutex::new(()),
-            });
+            app.manage(App::new(client));
             app.manage(visual::Visual::default());
             app.manage(update::Pending::default());
             app.manage(discord::Discord::default());
@@ -371,4 +409,52 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running Sound95");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn app(name: &str) -> (App, std::path::PathBuf) {
+        let dir = std::env::temp_dir().join(format!("sound95-lib-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        (App::new(Client::new(dir.join("session.json"))), dir)
+    }
+
+    fn token(access: &str) -> Token {
+        Token {
+            access: access.into(),
+        }
+    }
+
+    #[tokio::test]
+    async fn a_late_renewal_cannot_undo_a_log_off() {
+        let (app, dir) = app("late-renewal");
+        app.client.set_session(token("old")).await.unwrap();
+        app.client.logout().await.unwrap();
+        assert!(!app
+            .replace_session("old", Some(token("new")))
+            .await
+            .unwrap());
+        assert!(app.client.snapshot().await.user.is_none());
+        assert!(store::Store::load(&dir.join("session.json")).user.is_none());
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[tokio::test]
+    async fn only_the_turned_down_session_is_replaced() {
+        let (app, dir) = app("replace");
+        app.client.set_session(token("old")).await.unwrap();
+        assert!(app
+            .replace_session("old", Some(token("new")))
+            .await
+            .unwrap());
+        assert_eq!(app.client.access_token().await.unwrap(), "new");
+        // A second account signed in meanwhile stays signed in.
+        assert!(!app.replace_session("old", None).await.unwrap());
+        assert_eq!(app.client.access_token().await.unwrap(), "new");
+        assert!(app.replace_session("new", None).await.unwrap());
+        assert!(app.client.snapshot().await.user.is_none());
+        std::fs::remove_dir_all(dir).unwrap();
+    }
 }
