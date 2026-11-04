@@ -436,11 +436,15 @@
     $('#karaoke-toggle').click();
     await waitFor(() => !$('.float'), 'the karaoke window to close');
 
-    // Modern animates, until that's turned off.
+    // Modern animates, unless the system asks for less motion, until that's turned off.
+    const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
+    await log(`INFO the system ${reduced ? 'asks' : 'does not ask'} for reduced motion`);
     await openSettings('File', 'Settings');
     pick($('.settings select'), 'modern');
+    await check(() => $('.settings .options input').checked === !reduced, 'animations start on unless the system asks for less motion');
+    if (reduced) $('.settings .options input').click();
     await clickText('.dialog button', 'OK');
-    await check(() => skin() === 'modern' && document.documentElement.dataset.motion === 'on', 'Modern animates by default');
+    await check(() => skin() === 'modern' && document.documentElement.dataset.motion === 'on', 'Modern animates');
     await openSettings('File', 'Settings');
     await check(() => getComputedStyle($('.scrim > .window')).animationName.includes('s95-pop-in'), 'its dialogs open with an animation');
     await log('SHOT modern-settings');
