@@ -28,6 +28,9 @@ const RANGE_DB = 54;
 // How fast the memory of the loudest music fades, in dB a frame: about 7 dB a minute,
 // so a quiet stretch stays quiet but a quiet album gets its height back eventually.
 const LOUDEST_FALL = 0.004;
+// Sound already on its way to the tap was played at the old volume, so frames this
+// soon after a change say nothing about how loud the music is.
+const VOLUME_SETTLE_MS = 300;
 const PIXEL = 2;
 
 const VGA = ['#ff0000', '#ffff00', '#00ff00', '#00ffff', '#0000ff', '#ff00ff', '#ffffff'];
@@ -57,24 +60,33 @@ export function setFollowsVolume(on) {
   try { localStorage.setItem(FOLLOW_KEY, on ? '1' : '0'); } catch { /* optional */ }
 }
 
-const volumeDb = () => 20 * Math.log10(Math.max(getVolume(), 0.001));
+const volumeDb = (volume = getVolume()) => 20 * Math.log10(Math.max(volume, 0.001));
 
 /**
- * How far to lower everything, as a share of the height. The backend scales each
- * frame to its own loudest band, and `peak` says how loud that really was. The
- * loudest the music itself has been lately (with the volume taken back out) fills
- * the display at full volume, so quiet passages and a lower volume both show lower.
+ * How far to lower everything, as a share of the height. The backend scales the
+ * bands to `peak`, the loudest band lately in dB. The loudest the music itself has
+ * been lately (with the volume taken back out) fills the display at full volume, so
+ * quiet passages and a lower volume both show lower.
  */
-function quietBy(peak) {
-  if (!follows || !Number.isFinite(peak)) return 0;
-  loudest = Math.max(peak - volumeDb(), loudest - LOUDEST_FALL);
-  return Math.min(1, Math.max(0, (loudest - peak) / RANGE_DB));
+function quietBy({ payload: frame, volume, settled }) {
+  if (!follows || !Number.isFinite(frame.peak)) return 0;
+  // This frame's own loudest band. The backend's peak falls slowly, so right after
+  // the volume goes down it would pass for much louder music.
+  const own = frame.peak - RANGE_DB * (1 - Math.max(...frame.bands) / 255);
+  if (frame.level > 0 && volume > 0 && settled) {
+    loudest = Math.max(own - volumeDb(volume), loudest - LOUDEST_FALL);
+  } else {
+    loudest -= LOUDEST_FALL; // silence, mute or a volume change still reaching the tap
+  }
+  return Math.min(1, Math.max(0, (loudest - frame.peak) / RANGE_DB));
 }
 
 let capturing = false;
 let stopTimer = null;
 let drawing = false;
 let drawnAt = 0;
+let seenVolume = null;
+let volumeChangedAt = -Infinity;
 const surfaces = new Set();
 const audioListeners = new Set();
 
@@ -84,16 +96,20 @@ window.__TAURI__.event.listen('sound95:visual', ({ payload }) => {
   const now = performance.now();
   audio.outputMs = payload.outputMs;
   if (payload.live) audio.liveAt = now;
-  arriving.push({ at: now, payload });
+  // Stamped as it arrives, since Bluetooth holds it back until after a change is old.
+  const volume = getVolume();
+  if (volume !== seenVolume) { seenVolume = volume; volumeChangedAt = now; }
+  arriving.push({ at: now, payload, volume, settled: now - volumeChangedAt >= VOLUME_SETTLE_MS });
   wake();
 });
 
 /** Bluetooth plays late, so frames wait until their sound is actually heard. */
 function applyHeardFrames(now) {
-  let frame = null;
-  while (arriving.length && now - arriving[0].at >= audio.outputMs) frame = arriving.shift().payload;
-  if (!frame) return;
-  const lower = quietBy(frame.peak);
+  let heard = null;
+  while (arriving.length && now - arriving[0].at >= audio.outputMs) heard = arriving.shift();
+  if (!heard) return;
+  const frame = heard.payload;
+  const lower = quietBy(heard);
   const shrink = 10 ** ((-lower * RANGE_DB) / 20);
   audio.level = Math.max(0, frame.level / 255 - lower);
   audio.frameAt = now;
