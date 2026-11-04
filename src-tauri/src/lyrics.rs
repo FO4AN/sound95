@@ -25,6 +25,10 @@ const MAX_BODY: usize = 2 * 1024 * 1024;
 /// LRCLIB often answers 503 with "Retry-After: 1", then works.
 const LRCLIB_TRIES: u32 = 6;
 const LRCLIB_BUDGET: Duration = Duration::from_secs(12);
+/// LRCLIB's answer waits for NetEase, so a slow NetEase can't hold it up for long.
+const NETEASE_BUDGET: Duration = Duration::from_secs(6);
+/// A host that doesn't answer at all fails this soon, not at the full timeout.
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(4);
 const MAX_PAIRS: usize = 4;
 const MAX_RESULTS: usize = 8;
 
@@ -128,6 +132,7 @@ fn http() -> &'static reqwest::Client {
     CLIENT.get_or_init(|| {
         reqwest::Client::builder()
             .timeout(TIMEOUT)
+            .connect_timeout(CONNECT_TIMEOUT)
             .user_agent(USER_AGENT)
             .build()
             .expect("http client")
@@ -935,12 +940,9 @@ fn netease_request(path: &str) -> RequestBuilder {
         .header(header::REFERER, "https://music.163.com/")
 }
 
-async fn netease_song(
-    q: &Query,
-    song: &Value,
-    found: &mut Vec<Lyrics>,
-    failed: &mut bool,
-) -> Option<()> {
+/// One search result's lyrics, if it's the song and has any.
+async fn netease_song(q: &Query, song: Option<&Value>, failed: &mut bool) -> Option<Lyrics> {
+    let song = song?;
     let id = song["id"].as_u64()?;
     let title = song["name"].as_str()?;
     let artists: Vec<&str> = song["artists"]
@@ -972,10 +974,7 @@ async fn netease_song(
     } else {
         words
     };
-    found.extend(finished(
-        q, "NetEase", title, &artist, seconds, lines, matched,
-    ));
-    Some(())
+    finished(q, "NetEase", title, &artist, seconds, lines, matched)
 }
 
 async fn netease(q: &Query, found: &mut Vec<Lyrics>, failed: &mut bool) {
@@ -992,25 +991,28 @@ async fn netease(q: &Query, found: &mut Vec<Lyrics>, failed: &mut bool) {
             ("s", text.as_str()),
         ]);
         let Some(results) = json(req).await else {
+            // A site that didn't answer this won't answer the next one either.
             *failed = true;
-            continue;
+            return;
         };
         let empty = Vec::new();
         let songs = results["result"]["songs"].as_array().unwrap_or(&empty);
-        let mut tried = 0;
-        for song in songs {
-            if tried == 3 {
-                break;
-            }
+        let mut picks = songs.iter().filter(|song| {
             let name = song["name"].as_str().unwrap_or("");
             let singer = song["artists"][0]["name"].as_str().unwrap_or("");
             let off_by = song["duration"].as_f64().map(|ms| ms / 1000.0 - q.seconds);
-            if match_score(q, name, singer, off_by).is_none() {
-                continue;
-            }
-            tried += 1;
-            netease_song(q, song, found, failed).await;
-        }
+            match_score(q, name, singer, off_by).is_some()
+        });
+        // Each lyric is a round trip of its own, so the three go out together.
+        let (a, b, c) = (picks.next(), picks.next(), picks.next());
+        let (mut failed_a, mut failed_b, mut failed_c) = (false, false, false);
+        let (a, b, c) = tokio::join!(
+            netease_song(q, a, &mut failed_a),
+            netease_song(q, b, &mut failed_b),
+            netease_song(q, c, &mut failed_c),
+        );
+        *failed |= failed_a || failed_b || failed_c;
+        found.extend([a, b, c].into_iter().flatten());
         if good_enough(found) {
             return;
         }
@@ -1085,7 +1087,12 @@ pub async fn search(req: Request) -> Result<Vec<Lyrics>, AppError> {
                 failed_a = true;
             }
         },
-        netease(&q, &mut word_timed, &mut failed_b),
+        async {
+            let search = netease(&q, &mut word_timed, &mut failed_b);
+            if tokio::time::timeout(NETEASE_BUDGET, search).await.is_err() {
+                failed_b = true;
+            }
+        },
     );
     let mut found = timed;
     found.append(&mut word_timed);
@@ -1384,67 +1391,109 @@ mod tests {
         assert_eq!(text, ["It's the first line", "second & last", "third"]);
     }
 
-    /// Answers each request with the first reply whose path prefix matches.
-    fn serve(replies: Vec<(&'static str, u16, &'static str)>) -> String {
+    type Reply = (&'static str, u16, &'static str, u64);
+
+    /// Answers each request with the first reply whose path prefix matches, after
+    /// that reply's delay in ms, and points the lyrics hosts at it.
+    fn serve(replies: Vec<Reply>) {
         use std::io::{Read, Write};
         let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
         let base = format!("http://{}", listener.local_addr().expect("address"));
+        let replies = std::sync::Arc::new(replies);
         std::thread::spawn(move || {
             for mut stream in listener.incoming().flatten() {
-                let mut buf = [0u8; 8192];
-                let read = stream.read(&mut buf).unwrap_or(0);
-                let head = String::from_utf8_lossy(&buf[..read]).to_string();
-                let path = head.split_whitespace().nth(1).unwrap_or("").to_string();
-                let (status, text) = replies
-                    .iter()
-                    .find(|(prefix, _, _)| path.starts_with(prefix))
-                    .map_or((404, ""), |(_, status, text)| (*status, *text));
-                let reply = format!(
-                    "HTTP/1.1 {status} X\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{text}",
-                    text.len()
-                );
-                let _ = stream.write_all(reply.as_bytes());
+                let replies = replies.clone();
+                std::thread::spawn(move || {
+                    let mut buf = [0u8; 8192];
+                    let read = stream.read(&mut buf).unwrap_or(0);
+                    let head = String::from_utf8_lossy(&buf[..read]).to_string();
+                    let path = head.split_whitespace().nth(1).unwrap_or("").to_string();
+                    let (status, text, delay) = replies
+                        .iter()
+                        .find(|(prefix, ..)| path.starts_with(prefix))
+                        .map_or((404, "", 0), |(_, status, text, delay)| {
+                            (*status, *text, *delay)
+                        });
+                    std::thread::sleep(Duration::from_millis(delay));
+                    let reply = format!(
+                        "HTTP/1.1 {status} X\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{text}",
+                        text.len()
+                    );
+                    let _ = stream.write_all(reply.as_bytes());
+                });
             }
         });
-        base
+        std::env::set_var("SOUND95_LYRICS_BASE", base);
     }
 
-    // The mock hosts only stand in for the real ones in debug builds.
-    #[cfg(debug_assertions)]
-    #[tokio::test]
-    async fn refusals_are_not_taken_for_no_lyrics() {
-        let request = || Request {
+    /// The mock hosts are one setting for the whole process.
+    static MOCK_HOSTS: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+    fn plain_request() -> Request {
+        Request {
             title: "Artist - Song".into(),
             artist: "x".into(),
             duration_ms: 200_000,
             exact: false,
             everything: false,
             speed_title: None,
-        };
-        let refusing = serve(vec![
-            ("/lrclib/", 200, "[]"),
-            ("/netease/", 200, r#"{"code":-460,"message":"Cheating"}"#),
-            ("/genius/", 403, "<html>Just a moment...</html>"),
+        }
+    }
+
+    // The mock hosts only stand in for the real ones in debug builds.
+    #[cfg(debug_assertions)]
+    #[tokio::test]
+    async fn netease_lyrics_are_fetched_together() {
+        let _hosts = MOCK_HOSTS.lock().await;
+        let song = r#"{"id":1,"name":"Song","duration":200000,"artists":[{"name":"Artist"}]}"#;
+        let songs: &'static str = Box::leak(
+            format!(r#"{{"code":200,"result":{{"songs":[{song},{song},{song}]}}}}"#)
+                .into_boxed_str(),
+        );
+        serve(vec![
+            ("/lrclib/", 200, "[]", 0),
+            ("/netease/api/search", 200, songs, 0),
+            (
+                "/netease/api/song",
+                200,
+                r#"{"code":200,"lrc":{"lyric":"[00:01.00]a\n[00:02.00]b\n[00:03.00]c"}}"#,
+                500,
+            ),
+            ("/genius/", 200, r#"{"response":{"sections":[]}}"#, 0),
         ]);
-        std::env::set_var("SOUND95_LYRICS_BASE", &refusing);
-        let refused = search(request()).await;
+        let started = std::time::Instant::now();
+        let found = search(plain_request()).await.expect("found");
+        // One after another, the three lyrics would take 1.5 s.
+        assert!(started.elapsed() < Duration::from_millis(1200));
+        assert_eq!(found[0].source, "NetEase");
+    }
+
+    #[cfg(debug_assertions)]
+    #[tokio::test]
+    async fn refusals_are_not_taken_for_no_lyrics() {
+        let _hosts = MOCK_HOSTS.lock().await;
+        serve(vec![
+            ("/lrclib/", 200, "[]", 0),
+            ("/netease/", 200, r#"{"code":-460,"message":"Cheating"}"#, 0),
+            ("/genius/", 403, "<html>Just a moment...</html>", 0),
+        ]);
+        let refused = search(plain_request()).await;
         assert_eq!(refused.err().map(|e| e.code), Some("network"));
-        let broken = serve(vec![
-            ("/lrclib/", 200, "[]"),
-            ("/netease/", 503, "<html>Service Unavailable</html>"),
-            ("/genius/", 200, r#"{"response":{"sections":[]}}"#),
+        serve(vec![
+            ("/lrclib/", 200, "[]", 0),
+            ("/netease/", 503, "<html>Service Unavailable</html>", 0),
+            ("/genius/", 200, r#"{"response":{"sections":[]}}"#, 0),
         ]);
-        std::env::set_var("SOUND95_LYRICS_BASE", &broken);
-        assert!(search(request()).await.is_err());
+        assert!(search(plain_request()).await.is_err());
         // Every site answering with nothing is a real "no lyrics".
-        let empty = serve(vec![
-            ("/lrclib/", 200, "[]"),
-            ("/netease/", 200, r#"{"result":{"songs":[]},"code":200}"#),
-            ("/genius/", 200, r#"{"response":{"sections":[]}}"#),
+        serve(vec![
+            ("/lrclib/", 200, "[]", 0),
+            ("/netease/", 200, r#"{"result":{"songs":[]},"code":200}"#, 0),
+            ("/genius/", 200, r#"{"response":{"sections":[]}}"#, 0),
         ]);
-        std::env::set_var("SOUND95_LYRICS_BASE", &empty);
-        assert!(search(request()).await.is_ok_and(|found| found.is_empty()));
-        std::env::remove_var("SOUND95_LYRICS_BASE");
+        assert!(search(plain_request())
+            .await
+            .is_ok_and(|found| found.is_empty()));
     }
 
     #[test]
