@@ -41,7 +41,6 @@ async function render() {
   navListeners.forEach((fn) => fn(route));
   content.scrollTop = 0;
   clear(content, el('div', { class: 'view note' }, tr('Loading...')));
-  rows.clear();
   try {
     const node = await VIEWS[route.name](route, () => token === renderToken);
     if (token === renderToken) {
@@ -64,16 +63,31 @@ function empty(text, iconName = 'note') {
   return el('div', { class: 'empty' }, icon(iconName), el('div', {}, text));
 }
 
-const rows = new Set();
+// Each track row's parts, found from its node. Rows are looked up on the page, so
+// rows from a page that was replaced, or never shown, cost nothing.
+const rows = new WeakMap();
 
-/** Re-marks playing rows and hearts without rebuilding the list. */
+/**
+ * Re-marks playing rows and hearts without rebuilding the list. This runs on every
+ * player and session event, so only rows whose state changed are redrawn.
+ */
 export function syncRows() {
   const current = player.current?.urn;
-  for (const row of rows) {
+  for (const node of content.querySelectorAll('.row')) {
+    const row = rows.get(node);
+    if (!row) continue;
     const playing = row.track.urn === current;
-    row.node.classList.toggle('playing', playing);
-    clear(row.num, playing ? icon(player.playing ? 'play' : 'pause') : String(row.index + 1));
-    clear(row.heart, isLiked(row.track) ? icon('heart-on') : null);
+    const num = playing ? (player.playing ? 'play' : 'pause') : '';
+    if (row.drawnNum !== num) {
+      row.drawnNum = num;
+      node.classList.toggle('playing', playing);
+      clear(row.num, num ? icon(num) : String(row.index + 1));
+    }
+    const liked = isLiked(row.track);
+    if (row.drawnLiked !== liked) {
+      row.drawnLiked = liked;
+      clear(row.heart, liked ? icon('heart-on') : null);
+    }
   }
 }
 
@@ -143,7 +157,7 @@ function trackRow(track, list, index) {
   }, track.artist),
   el('span', { class: 'plays' }, fmtCount(track.plays)),
   el('span', { class: 'dur' }, fmtTime(track.duration)));
-  rows.add({ node, track, index, num, heart });
+  rows.set(node, { track, index, num, heart });
   return node;
 }
 

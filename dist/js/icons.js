@@ -698,10 +698,20 @@ function pixelIcon(name) {
   return svg;
 }
 
+// Each icon is drawn once per skin and copied after that. A pixel icon is up to a
+// hundred squares, and copying is far cheaper than drawing them again.
+const drawn = new Map();
+
 export function icon(name) {
-  const svg = smooth() && SMOOTH[name] ? smoothIcon(name) : pixelIcon(name);
-  svg.dataset.icon = name;
-  return svg;
+  const smoothed = smooth() && SMOOTH[name];
+  const key = `${smoothed ? 'smooth' : 'pixel'}:${name}`;
+  let svg = drawn.get(key);
+  if (!svg) {
+    svg = smoothed ? smoothIcon(name) : pixelIcon(name);
+    svg.dataset.icon = name;
+    drawn.set(key, svg);
+  }
+  return svg.cloneNode(true);
 }
 
 export function setIcon(node, name) {
