@@ -495,10 +495,21 @@ fn tidy(mut lines: Vec<Line>) -> Vec<Line> {
     lines
 }
 
-/// `<mm:ss.xx>word <mm:ss.xx>word`, as some LRC files time their words.
-fn enhanced_words(text: &str, end: u64) -> Vec<Word> {
+/// `<mm:ss.xx>word <mm:ss.xx>word`, as some LRC files time their words. Text before
+/// the first stamp starts with the line. Nothing says when the last word ends, so its
+/// `dur` stays 0 and karaoke ends it with the line.
+fn enhanced_words(text: &str, start: u64) -> Vec<Word> {
     let mut words: Vec<Word> = Vec::new();
-    for piece in text.split('<').skip(1) {
+    let mut pieces = text.split('<');
+    let lead = pieces.next().unwrap_or_default();
+    if !lead.is_empty() {
+        words.push(Word {
+            ms: start,
+            dur: 0,
+            text: lead.to_string(),
+        });
+    }
+    for piece in pieces {
         let Some((tag, word)) = piece.split_once('>') else {
             return Vec::new();
         };
@@ -514,14 +525,24 @@ fn enhanced_words(text: &str, end: u64) -> Vec<Word> {
             text: word.to_string(),
         });
     }
-    if let Some(last) = words.last_mut() {
-        last.dur = end.saturating_sub(last.ms);
-    }
     words
+}
+
+/// `[offset:+500]` shows every line 500 ms sooner.
+fn lrc_offset(text: &str) -> i64 {
+    text.lines()
+        .find_map(|line| {
+            let line = line.trim().to_ascii_lowercase();
+            let value = line.strip_prefix("[offset:")?.strip_suffix(']')?;
+            value.trim().trim_start_matches('+').parse().ok()
+        })
+        .unwrap_or(0)
 }
 
 /// Standard LRC: `[01:02.34]line`, with several stamps when a line repeats.
 pub fn parse_lrc(text: &str) -> Vec<Line> {
+    let offset = lrc_offset(text);
+    let shift = |ms: u64| (ms as i64).saturating_sub(offset).max(0) as u64;
     let mut lines = Vec::new();
     for raw in text.lines() {
         let mut rest = raw.trim();
@@ -538,15 +559,24 @@ pub fn parse_lrc(text: &str) -> Vec<Line> {
         }
         let rest = rest.trim();
         if rest.contains('<') {
-            let words = enhanced_words(rest, 0);
+            // Word stamps are written for the line's first time; a repeat moves them along.
+            let first = stamps.iter().min().copied().unwrap_or(0);
+            let words = enhanced_words(rest, first);
             if !words.is_empty() {
                 let text: String = words.iter().map(|w| w.text.as_str()).collect();
                 for ms in &stamps {
+                    let words = words
+                        .iter()
+                        .map(|w| Word {
+                            ms: shift(w.ms + ms - first),
+                            ..w.clone()
+                        })
+                        .collect();
                     lines.push(Line {
-                        ms: *ms,
+                        ms: shift(*ms),
                         dur: 0,
                         text: text.trim().to_string(),
-                        words: words.clone(),
+                        words,
                     });
                 }
                 continue;
@@ -557,7 +587,7 @@ pub fn parse_lrc(text: &str) -> Vec<Line> {
                 continue;
             }
             lines.push(Line {
-                ms,
+                ms: shift(ms),
                 dur: 0,
                 text: rest.to_string(),
                 words: Vec::new(),
@@ -1360,6 +1390,32 @@ mod tests {
         assert_eq!(lines[0].text, "one two");
         assert_eq!(lines[0].words[0].dur, 1000);
         assert_eq!(lines[0].words[1].ms, 2000);
+        // A repeated line's words follow the repeat.
+        let lines =
+            parse_lrc("[00:01.00][00:11.00]<00:01.00>one <00:02.00>two\n[00:03.00]b\n[00:04.00]c");
+        assert_eq!(lines[3].ms, 11_000);
+        assert_eq!(lines[3].words[0].ms, 11_000);
+        assert_eq!(lines[3].words[1].ms, 12_000);
+        assert_eq!(lines[0].words[1].ms, 2000);
+        // Words before the first stamp start with the line.
+        let lines = parse_lrc("[00:05.00]Hello <00:05.50>world\n[00:07.00]b\n[00:08.00]c");
+        assert_eq!(lines[0].text, "Hello world");
+        assert_eq!(lines[0].words[0].ms, 5000);
+        assert_eq!(lines[0].words[0].dur, 500);
+        // "I <3 you" isn't word timing.
+        let lines = parse_lrc("[00:01.00]I <3 you\n[00:02.00]b\n[00:03.00]c");
+        assert_eq!(lines[0].text, "I <3 you");
+        assert!(lines[0].words.is_empty());
+    }
+
+    #[test]
+    fn lrc_offsets_move_every_line() {
+        let sooner = parse_lrc("[offset:+500]\n[00:01.50]a\n[00:03.00]b\n[00:05.00]<00:05.00>c");
+        assert_eq!(sooner[0].ms, 1000);
+        assert_eq!(sooner[2].ms, 4500);
+        assert_eq!(sooner[2].words[0].ms, 4500);
+        let later = parse_lrc("[Offset: -500]\n[00:01.50]a\n[00:03.00]b\n[00:05.00]c");
+        assert_eq!(later[0].ms, 2000);
     }
 
     #[test]
