@@ -6,11 +6,23 @@
 <title>Sound95</title>
 <link rel="stylesheet" href="win95.css">
 <link rel="stylesheet" href="app.css">
+<link rel="stylesheet" href="modern.css">
 </head>
 <body>
+  <div id="backdrop" aria-hidden="true"></div>
   <div id="app">
     <div class="window" id="main-window">
       <div class="titlebar" id="titlebar">
+        <span class="brand" data-tauri-drag-region>
+          <svg class="brand-mark" viewBox="0 0 32 32" aria-hidden="true">
+            <rect width="32" height="32" rx="8" fill="var(--logo-tile, #1b1b1b)"/>
+            <rect x="6" y="15" width="4" height="11" rx="2" fill="#ff4b3e"/>
+            <rect x="11.33" y="7" width="4" height="19" rx="2" fill="#3ccf63"/>
+            <rect x="16.67" y="11" width="4" height="15" rx="2" fill="#3b7bff"/>
+            <rect x="22" y="17" width="4" height="9" rx="2" fill="#ffcc1f"/>
+          </svg>
+          <span class="brand-name">Sound<b>95</b></span>
+        </span>
         <span class="titlebar-icon" id="title-icon"></span>
         <span class="titlebar-text" id="title-text" data-tauri-drag-region>Sound95</span>
         <span class="titlebar-buttons">

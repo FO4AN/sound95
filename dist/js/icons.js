@@ -611,10 +611,73 @@ function rows(name) {
   return ART[name].split('\n').filter((line) => line.length);
 }
 
-export function icon(name) {
+// The Modern skin's icons: smooth 24x24 outlines. "f" is filled, "s" stroked,
+// "a" filled in the accent colour.
+const SMOOTH = {
+  gear: ['s', 'M12 9a3 3 0 1 1 0 6a3 3 0 1 1 0-6zM12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3M5.3 5.3l2.1 2.1M16.6 16.6l2.1 2.1M5.3 18.7l2.1-2.1M16.6 7.4l2.1-2.1'],
+  note: ['s', 'M9 18V5.5l11-2V16M9 18a3 3 0 1 1-6 0a3 3 0 1 1 6 0zM20 16a3 3 0 1 1-6 0a3 3 0 1 1 6 0z'],
+  speaker: ['s', 'M4 9.5h3.5L12 6v12l-4.5-3.5H4zM15.5 9.5a3.5 3.5 0 0 1 0 5M18 7a7 7 0 0 1 0 10'],
+  mute: ['s', 'M4 9.5h3.5L12 6v12l-4.5-3.5H4zM16 10l4 4M20 10l-4 4'],
+  home: ['s', 'M3.5 10.5 12 3.5l8.5 7V20a1 1 0 0 1-1 1H15v-6H9v6H4.5a1 1 0 0 1-1-1z'],
+  search: ['s', 'M10.5 4a6.5 6.5 0 1 1 0 13a6.5 6.5 0 1 1 0-13zM20.5 20.5l-5.4-5.4'],
+  heart: ['s', 'M12 20s-7.5-4.6-7.5-10A4.2 4.2 0 0 1 12 7.4 4.2 4.2 0 0 1 19.5 10c0 5.4-7.5 10-7.5 10z'],
+  'heart-on': ['a', 'M12 20s-7.5-4.6-7.5-10A4.2 4.2 0 0 1 12 7.4 4.2 4.2 0 0 1 19.5 10c0 5.4-7.5 10-7.5 10z'],
+  folder: ['s', 'M3 6.5A1.5 1.5 0 0 1 4.5 5H9l2 2.5h8.5A1.5 1.5 0 0 1 21 9v9.5a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 18.5z'],
+  playlist: ['s', 'M4 6h12M4 11h12M4 16h6M15 18.5v-6l5 3z'],
+  user: ['s', 'M12 3.5a4 4 0 1 1 0 8a4 4 0 1 1 0-8zM4.5 20.5c1-3.6 4-5.5 7.5-5.5s6.5 1.9 7.5 5.5'],
+  users: ['s', 'M9 4.5a3.5 3.5 0 1 1 0 7a3.5 3.5 0 1 1 0-7zM2.5 19.5c.8-3 3.3-4.6 6.5-4.6s5.7 1.6 6.5 4.6M16 4.8a3.3 3.3 0 0 1 0 6.4M18 14.9c2 .6 3.2 2.1 3.6 4.6'],
+  clock: ['s', 'M12 3a9 9 0 1 1 0 18a9 9 0 1 1 0-18zM12 7.5V12l3 2'],
+  keys: ['s', 'M7.5 10.5a4 4 0 1 1 0 8a4 4 0 1 1 0-8zM10.3 11.7 19 3M16 6l2.5 2.5M13.5 8.5l2 2'],
+  warn: ['s', 'M12 3.5 21.5 20h-19zM12 10v4.5M12 17.5v.5'],
+  info: ['s', 'M12 3a9 9 0 1 1 0 18a9 9 0 1 1 0-18zM12 11v6M12 7.5v.5'],
+  play: ['f', 'M8 5.2v13.6a.8.8 0 0 0 1.2.7l10.6-6.8a.8.8 0 0 0 0-1.4L9.2 4.5a.8.8 0 0 0-1.2.7z'],
+  pause: ['f', 'M7 5h3.5v14H7zM13.5 5H17v14h-3.5z'],
+  prev: ['f', 'M6 5h2.2v14H6zM19 5.6v12.8L9.6 12z'],
+  next: ['f', 'M15.8 5H18v14h-2.2zM5 5.6v12.8l9.4-6.4z'],
+  shuffle: ['s', 'M3 7h3c2.5 0 4 1.2 5.3 3.3l1.4 2.4C14 15 15.5 17 18 17h3M18 14l3 3-3 3M3 17h3c1.6 0 2.8-.6 3.8-1.6M14.2 8.6C15.2 7.6 16.4 7 18 7h3M18 4l3 3-3 3'],
+  repeat: ['s', 'M17 2.5l3 3-3 3M4 11.5v-2a4 4 0 0 1 4-4h12M7 21.5l-3-3 3-3M20 12.5v2a4 4 0 0 1-4 4H4'],
+  'repeat-one': ['s', 'M17 2.5l3 3-3 3M4 11.5v-2a4 4 0 0 1 4-4h12M7 21.5l-3-3 3-3M20 12.5v2a4 4 0 0 1-4 4H4M11 10.5l1.5-1v5'],
+  queue: ['s', 'M4 6h16M4 12h10M4 18h10M16.5 14.5v6l4.5-3z'],
+  back: ['s', 'M15 5l-7 7 7 7'],
+  forward: ['s', 'M9 5l7 7-7 7'],
+  plus: ['s', 'M12 5v14M5 12h14'],
+  mic: ['s', 'M12 3a3 3 0 0 1 3 3v6a3 3 0 0 1-6 0V6a3 3 0 0 1 3-3zM5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21'],
+  bars: ['s', 'M5 20v-6M10 20V8M15 20v-9M20 20V4'],
+  check: ['s', 'M5 12.5l4.5 4.5L19 7'],
+  min: ['s', 'M6 12h12'],
+  max: ['s', 'M6.5 6.5h11v11h-11z'],
+  restore: ['s', 'M8.5 8.5h9v9h-9zM6.5 15.5v-9h9'],
+  close: ['s', 'M6.5 6.5l11 11M17.5 6.5l-11 11'],
+};
+
+const SVG = 'http://www.w3.org/2000/svg';
+const smooth = () => document.documentElement.dataset.skin === 'modern';
+
+function smoothIcon(name) {
+  const [kind, d] = SMOOTH[name];
+  const svg = document.createElementNS(SVG, 'svg');
+  svg.setAttribute('class', `ic ic-${name}`);
+  svg.setAttribute('viewBox', '0 0 24 24');
+  svg.setAttribute('aria-hidden', 'true');
+  const path = document.createElementNS(SVG, 'path');
+  path.setAttribute('d', d);
+  if (kind === 's') {
+    path.setAttribute('fill', 'none');
+    path.setAttribute('stroke', 'currentColor');
+    path.setAttribute('stroke-width', '2');
+    path.setAttribute('stroke-linecap', 'round');
+    path.setAttribute('stroke-linejoin', 'round');
+  } else {
+    path.style.fill = kind === 'a' ? 'var(--accent, currentColor)' : 'currentColor';
+  }
+  svg.append(path);
+  return svg;
+}
+
+function pixelIcon(name) {
   const lines = rows(name);
   const size = lines.length;
-  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  const svg = document.createElementNS(SVG, 'svg');
   svg.setAttribute('class', 'px');
   svg.setAttribute('viewBox', `0 0 ${size} ${size}`);
   svg.setAttribute('aria-hidden', 'true');
@@ -623,7 +686,7 @@ export function icon(name) {
     [...line].forEach((ch, x) => {
       const fill = PALETTE[ch];
       if (!fill) return;
-      const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+      const rect = document.createElementNS(SVG, 'rect');
       rect.setAttribute('x', x);
       rect.setAttribute('y', y);
       rect.setAttribute('width', 1);
@@ -635,6 +698,17 @@ export function icon(name) {
   return svg;
 }
 
+export function icon(name) {
+  const svg = smooth() && SMOOTH[name] ? smoothIcon(name) : pixelIcon(name);
+  svg.dataset.icon = name;
+  return svg;
+}
+
 export function setIcon(node, name) {
   node.replaceChildren(icon(name));
+}
+
+/** Redraws every icon on the page, for when the skin changes. */
+export function refreshIcons() {
+  for (const svg of document.querySelectorAll('svg[data-icon]')) svg.replaceWith(icon(svg.dataset.icon));
 }

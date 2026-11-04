@@ -1,7 +1,8 @@
 # Sound95
 
 A Windows 95 style desktop client for SoundCloud, laid out like Spotify: library
-tree, main pane, Up Next queue and a bottom player bar. Built with Tauri 2, Rust and
+tree, main pane, Up Next queue and a bottom player bar. Prefer today's look? The Modern
+themes swap the 1995 chrome for rounded cards and smooth animations. Built with Tauri 2, Rust and
 plain JavaScript, with no frontend build step.
 
 ![Sound95 playing a track with the Visualizer open](docs/screenshot.png)
@@ -40,7 +41,8 @@ built into the app is refused.
   and related tracks, all inside the app.
 - **Visualizer.** Eleven modes: Spectrum, Oscilloscope, Mystify, Starfield, VU Meters, Waterfall,
   Sunburst, Plasma, 3D Pipes, Flying Windows and Marquee, driven by the audio that's actually
-  playing. There's a small meter in the player bar too. Double click to fill the window.
+  playing. There's a small meter in the player bar too. Double click to fill the window. The bars
+  stand lower in quiet passages and when you turn the volume down; Settings can turn that off.
 - **Karaoke.** Finds lyrics for whatever plays and wipes through them in time. `[` moves the
   words earlier and `]` later. If a song only has plain text, the timing is a guess, and **Tap to
   Sync** lets you fix it: press Space as each line starts and it's saved for that track.
@@ -49,8 +51,17 @@ built into the app is refused.
   the heart updates and the window closes by itself. SoundCloud's bot check turns away likes sent
   directly by apps, so they have to come from its own page.
 - **Any window size.** The layout folds down to fit a small window or a tiling tile.
-- **Settings.** File > Settings picks a light or dark theme and the language: English, Русский,
-  Українська, Español, Deutsch or Français.
+- **Looks.** Eight Windows 95 schemes (Light, Dark, Desert, Eggplant, Rainy Day, Rose, Spruce and
+  High Contrast) and two Modern ones, dark and light. The first time you log on, a welcome lets
+  you try them all before you start. File > Settings changes it later.
+- **Animations.** The Modern themes open, close and switch things with smooth animations, at
+  Slow, Normal or Fast. Settings can turn them off, and they start off if your system asks for
+  reduced motion. The Windows 95 themes stay instant, like the real thing.
+- **Your own background.** Settings > Background puts a picture, GIF or video behind the app,
+  optionally blurred. With **Move with the music** a GIF or video plays faster when the music is
+  loud, stops when it pauses, and everything pulses with the bass. The file stays on your
+  computer.
+- **Language.** English, Русский, Українська, Español, Deutsch or Français.
 - **Discord.** Settings can show what you're listening to on your Discord profile. It's off until
   you turn it on.
 - **Tray.** Closing the window keeps the music playing. Right click the tray icon to pause, skip
@@ -107,13 +118,18 @@ without it, installed copies can't update to a new build.
 - `dist/js/player.js`: plays through SoundCloud's official
   [Widget](https://developers.soundcloud.com/docs/api/html5-widget), so listeners stream
   directly and don't use the app's stream limit. The player bar controls it.
+- `dist/js/themes.js`, `dist/win95.css`, `dist/modern.css`: the colour schemes and the two
+  skins. Modern restyles the same page, so every feature works in both.
+- `dist/js/backdrop.js`, `dist/js/gif.js`: the background. GIFs are decoded in the app so
+  their speed can follow the music, which an `<img>` can't do.
 - `dist/js/`: the rest of the UI.
 
 ## Testing
 
 ```bash
 cd src-tauri && cargo test
-cd .. && OUT=/tmp/s95 tools/e2e.sh   # needs a debug build
+cd .. && node tools/check-gif.mjs   # GIF decoder against ImageMagick's frames
+OUT=/tmp/s95 tools/e2e.sh   # needs a debug build
 ```
 
 `tools/mock-soundcloud.mjs` stands in for SoundCloud, including its sign-in page, and

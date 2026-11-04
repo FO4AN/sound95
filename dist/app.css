@@ -2,6 +2,20 @@
    built from Windows 95 parts. */
 
 #app { position: fixed; inset: 0; display: flex; flex-direction: column; }
+.brand { display: none; }
+
+/* Your own background, behind everything. Panels let some of it through. */
+#backdrop { position: fixed; inset: 0; overflow: hidden; pointer-events: none; }
+#backdrop > * {
+  position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover;
+  transform: scale(calc(var(--zoom, 1) * var(--pulse, 1)));
+}
+#backdrop.blur { --zoom: 1.12; }
+#backdrop.blur > * { filter: blur(18px); }
+.has-backdrop #main-window { background: color-mix(in srgb, var(--face) 70%, transparent); }
+.has-backdrop #main-window .sunken { background: color-mix(in srgb, var(--paper) 76%, transparent); }
+.has-backdrop .taskbar { background: color-mix(in srgb, var(--face) 76%, transparent); }
+.has-backdrop .list-head { background: color-mix(in srgb, var(--face) 92%, transparent); }
 #main-window { flex: 1; min-height: 0; }
 
 /* Toolbar */
@@ -338,15 +352,14 @@ kbd { font: inherit; }
 .theme-options label { display: flex; align-items: center; gap: 6px; }
 .theme-options input { margin: 0; accent-color: var(--select); }
 .monitor { width: 96px; padding: 5px 5px 8px; background: #c0c0c0; box-shadow: inset -1px -1px #000, inset 1px 1px #fff, inset -2px -2px #808080; }
-.monitor-screen { height: 54px; padding: 8px 12px 6px 8px; background: #008080; box-shadow: inset 1px 1px #000, inset -1px -1px #fff; }
-.monitor-window { height: 100%; padding: 1px; background: #c0c0c0; box-shadow: inset -1px -1px #000, inset 1px 1px #fff; }
-.monitor-window::before { content: ""; display: block; height: 5px; background: #000080; }
-.monitor-window::after { content: ""; display: block; height: calc(100% - 7px); margin-top: 1px; background: #fff; }
-.monitor.dark { background: #34363b; }
-.monitor.dark .monitor-screen { background: #101a20; }
-.monitor.dark .monitor-window { background: #34363b; }
-.monitor.dark .monitor-window::before { background: #2b4fa8; }
-.monitor.dark .monitor-window::after { background: #202226; }
+.monitor-screen { height: 54px; padding: 8px 12px 6px 8px; background: var(--desktop) center / cover no-repeat; box-shadow: inset 1px 1px #000, inset -1px -1px #fff; }
+.monitor-window { height: 100%; padding: 1px; background: var(--face); box-shadow: inset -1px -1px var(--dark), inset 1px 1px var(--hilite); }
+.monitor-window::before { content: ""; display: block; height: 5px; background: var(--select); }
+.monitor-window::after { content: ""; display: block; height: calc(100% - 7px); margin-top: 1px; background: var(--paper); }
+.monitor[data-skin="modern"] .monitor-window { padding: 2px; border-radius: 3px; background: var(--bg); box-shadow: none; }
+.monitor[data-skin="modern"] .monitor-window::before { height: 4px; border-radius: 2px; background: var(--panel); }
+.monitor[data-skin="modern"] .monitor-window::after { margin-top: 2px; height: calc(100% - 6px); border-radius: 2px; background: linear-gradient(180deg, var(--accent-deep), var(--panel) 70%); }
+.monitor.has-picture .monitor-window { opacity: .82; }
 select.dropdown {
   width: 100%; height: 22px; padding: 0 22px 0 4px; border: 0; border-radius: 0; appearance: none; -webkit-appearance: none;
   font: inherit; color: var(--text); box-shadow: var(--sunken);
@@ -354,7 +367,61 @@ select.dropdown {
 }
 select.dropdown:focus-visible { outline: 1px dotted var(--text); outline-offset: -4px; }
 .field-note { margin: 6px 0 0; }
+.settings-tabs { display: grid; }
+.settings-tabs .tabs { padding: 0 2px; }
+.tab-panel { padding: 10px; background: var(--face); box-shadow: var(--raised); }
+.theme-options select { width: 100%; }
+.monitor-screen { position: relative; overflow: hidden; }
+.monitor-picture { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.monitor-window { position: relative; }
+.file-input { display: none; }
+.file-name { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.file-buttons { display: flex; gap: 6px; }
+.file-buttons button { min-width: 0; padding: 0 10px; }
+.problem:empty { display: none; }
+.speed-row { display: grid !important; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 8px; padding-left: 19px; }
+.speed-row.off { color: var(--disabled); }
+.problem { color: #c00000; }
 .options { display: grid; gap: 6px; }
 .options label { display: flex; align-items: flex-start; gap: 6px; }
 .options input { margin: 1px 0 0; flex: none; accent-color: var(--select); }
 .options input:disabled + * { color: var(--disabled); }
+
+/* Welcome, the first time: a setup wizard, like the one Windows 95 came with. */
+.welcome { width: 600px; max-width: calc(100vw - 32px); max-height: calc(100vh - 32px); }
+.welcome-scrim { overflow: hidden; }
+.welcome-body { flex: 1 1 auto; min-height: 0; height: 300px; overflow-y: auto; display: grid; grid-template-columns: 140px minmax(0, 1fr); gap: 14px; padding: 12px 12px 0; }
+.welcome-art { display: grid; place-items: center; background: linear-gradient(180deg, #008080, #003c3c); box-shadow: var(--sunken); }
+.welcome-art .brand-mark { width: 72px; height: 72px; }
+.welcome-mark { display: none; }
+.welcome-page h1 { margin: 2px 0 12px; font-size: 16px; }
+.welcome-page p { margin: 0 0 8px; line-height: 1.4; }
+.welcome-foot { display: flex; justify-content: flex-end; align-items: center; margin-top: 12px; padding: 10px 12px 12px; box-shadow: var(--etched); }
+.welcome-dots { display: none; }
+.welcome-buttons { display: flex; gap: 6px; }
+.look-group { margin-top: 8px; }
+.look-title { margin: 0 0 4px; font-weight: 700; }
+.looks { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; }
+.look-card { min-width: 0; height: auto; min-height: 0; padding: 4px; display: grid; gap: 3px; text-align: left; }
+.look-card:active:not(:disabled) { padding: 5px 3px 3px 5px; }
+.look-card.selected { box-shadow: var(--pressed); }
+.look-card.selected .look-name { background: var(--select); color: var(--select-text); }
+.look-name { padding: 0 2px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.look-preview {
+  display: grid; height: 46px; gap: 2px; padding: 2px;
+  grid-template: "top top" 6px "side main" 1fr "bar bar" 8px / 28% 1fr;
+  background: var(--desktop); box-shadow: inset 0 0 0 1px rgba(0, 0, 0, .35);
+}
+.look-preview > * { display: block; }
+.lp-top { grid-area: top; background: var(--select); }
+.lp-side { grid-area: side; background: var(--paper); }
+.lp-main { grid-area: main; display: grid !important; grid-template-rows: 45% 1fr; background: var(--paper); }
+.lp-hero { background: var(--select); }
+.lp-bar { grid-area: bar; display: grid !important; place-items: center; background: var(--face); }
+.lp-play { width: 5px; height: 5px; background: var(--text); }
+.look-preview[data-skin="modern"] { gap: 3px; padding: 4px; border-radius: 4px; background: var(--bg); }
+.look-preview[data-skin="modern"] .lp-top { background: transparent; }
+.look-preview[data-skin="modern"] .lp-side, .look-preview[data-skin="modern"] .lp-main { border-radius: 3px; background: var(--panel); }
+.look-preview[data-skin="modern"] .lp-hero { border-radius: 3px 3px 0 0; background: linear-gradient(var(--accent-deep), var(--panel)); }
+.look-preview[data-skin="modern"] .lp-bar { background: transparent; }
+.look-preview[data-skin="modern"] .lp-play { border-radius: 50%; background: var(--fg); }

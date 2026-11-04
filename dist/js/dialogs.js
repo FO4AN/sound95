@@ -4,6 +4,7 @@ import { tr } from './i18n.js';
 import { el, clear, errorText } from './dom.js';
 import { icon } from './icons.js';
 import { api } from './api.js';
+import { leave } from './motion.js';
 
 const overlays = () => document.getElementById('overlays');
 
@@ -19,7 +20,7 @@ export function dialog(title, build, { width } = {}) {
   return new Promise((resolve) => {
     const scrim = el('div', { class: 'scrim' });
     const close = (value) => {
-      scrim.remove();
+      leave(scrim);
       document.removeEventListener('keydown', onKey, true);
       resolve(value);
     };
@@ -200,7 +201,7 @@ export function showMenu(items, x, y, { below, className, onClose, header } = {}
   setTimeout(() => document.addEventListener('mousedown', onDown), 0);
   document.addEventListener('keydown', onKey);
   openMenu = () => {
-    menu.remove();
+    leave(menu);
     document.removeEventListener('mousedown', onDown);
     document.removeEventListener('keydown', onKey);
     onClose?.();

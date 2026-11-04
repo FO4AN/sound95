@@ -5,6 +5,7 @@ import { clear, el, errorText } from './dom.js';
 import { icon } from './icons.js';
 import { api } from './api.js';
 import { dialog, message } from './dialogs.js';
+import { leave } from './motion.js';
 
 const FIRST_CHECK_MS = 10_000;
 const CHECK_EVERY_MS = 6 * 60 * 60 * 1000;
@@ -15,7 +16,7 @@ let offered = null; // the update the balloon shows
 let declined = null; // the version you said Later to, until the next launch
 
 function closeBalloon() {
-  balloon?.remove();
+  leave(balloon);
   balloon = null;
   offered = null;
 }

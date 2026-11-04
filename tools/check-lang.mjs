@@ -10,11 +10,11 @@ for (const [, text] of code.matchAll(/(?<![\w.$])tr\('((?:[^'\\]|\\.)*)'/g)) key
 for (const [, a, b] of code.matchAll(/tr\(isPeople \? '([^']*)' : '([^']*)'/g)) { keys.add(a); keys.add(b); }
 for (const [, a, b] of code.matchAll(/tr\(lyrics\.offBy > 0 \? '([^']*)' : '([^']*)'/g)) { keys.add(a); keys.add(b); }
 for (const [, text] of html.matchAll(/data-(?:t|tip|hint)="([^"]+)"/g)) keys.add(text);
-for (const [, text] of code.matchAll(/label: '([^']+)', draw:/g)) keys.add(text);
+for (const [, text] of code.matchAll(/label: '([^']+)', (?:draw|skin):/g)) keys.add(text);
 for (const [, list] of code.matchAll(/const GENRES = \[([^\]]*)\]/g)) {
   for (const [, text] of list.matchAll(/'([^']+)'/g)) keys.add(text);
 }
-for (const text of ['File', 'View', 'Playback', 'Help', 'Off', 'All', 'One', 'Small Text', 'Medium Text', 'Large Text', 'Lyrics', 'Timing', 'Mode', 'You']) keys.add(text);
+for (const text of ['File', 'View', 'Playback', 'Help', 'Off', 'All', 'One', 'Small Text', 'Medium Text', 'Large Text', 'Lyrics', 'Timing', 'Mode', 'You', 'Slow', 'Normal', 'Fast']) keys.add(text);
 
 if (process.argv[2] === '--keys') {
   console.log(JSON.stringify([...keys].sort(), null, 1));

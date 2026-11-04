@@ -5,6 +5,7 @@ import { tr } from './i18n.js';
 import { el, clear } from './dom.js';
 import { icon, setIcon } from './icons.js';
 import { closeMenu, showMenu } from './dialogs.js';
+import { leave } from './motion.js';
 
 const STORE_KEY = 'sound95.windows';
 const FIRST_Z = 10;
@@ -132,7 +133,7 @@ export function floatWindow({ id, title, iconName, width, height, minWidth = 280
     close() {
       if (!open.delete(win)) return;
       closeMenu();
-      node.remove();
+      leave(node);
       window.removeEventListener('resize', fit);
       onClose?.();
     },

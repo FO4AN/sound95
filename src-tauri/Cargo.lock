@@ -3620,7 +3620,7 @@ dependencies = [
 
 [[package]]
 name = "sound95"
-version = "0.5.3"
+version = "0.6.0"
 dependencies = [
  "discord-rich-presence",
  "reqwest 0.12.28",

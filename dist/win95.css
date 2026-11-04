@@ -11,7 +11,9 @@
   font-weight: 700;
 }
 
-:root {
+/* The base scheme also applies to anything marked classic, so a preview of a Windows
+   scheme starts from it even inside the Modern skin. */
+:root, [data-skin="classic"] {
   --face: #c0c0c0;
   --hilite: #ffffff;
   --light: #dfdfdf;
@@ -41,7 +43,8 @@
   --etched: inset 0 1px var(--shadow), inset 0 2px var(--hilite);
 }
 
-:root[data-theme="dark"] {
+/* Schemes are keyed on any element, so Settings can preview one in its little monitor. */
+[data-theme="dark"] {
   --face: #34363b;
   --hilite: #5e6168;
   --light: #484b52;
@@ -59,6 +62,36 @@
   --etch: #000000;
   color-scheme: dark;
 }
+
+/* More of the schemes Windows 95 shipped with, more or less. */
+[data-theme="desert"] {
+  --face: #d6ccb7; --light: #e8e1d3; --shadow: #a39272; --select: #805a2a;
+  --desktop: #a28d68; --hover: #ece4d4; --link: #805a2a;
+}
+[data-theme="eggplant"] {
+  --face: #90b0a8; --light: #b0c8c0; --hilite: #e4eeea; --shadow: #587870; --select: #580058;
+  --desktop: #400040; --hover: #c8dad4; --link: #580058; --disabled: #587870;
+}
+[data-theme="rainy"] {
+  --face: #a8b4c0; --light: #c4ccd6; --hilite: #eef2f6; --shadow: #6c7c8c; --select: #4f6573;
+  --desktop: #3a4a56; --hover: #ccd5de; --link: #2c4656; --disabled: #6c7c8c;
+}
+[data-theme="rose"] {
+  --face: #cfafb7; --light: #e0c8ce; --hilite: #f6ecee; --shadow: #9a7680; --select: #8c3a54;
+  --desktop: #806070; --hover: #ead6db; --link: #8c3a54; --disabled: #9a7680;
+}
+[data-theme="spruce"] {
+  --face: #a0c0a0; --light: #bcd4bc; --hilite: #eaf3ea; --shadow: #688868; --select: #3f6f3f;
+  --desktop: #305830; --hover: #c8dcc8; --link: #2f5a2f; --disabled: #688868;
+}
+[data-theme="contrast"] {
+  --face: #000000; --hilite: #ffffff; --light: #808080; --shadow: #808080; --dark: #c0c0c0;
+  --select: #800080; --select-text: #ffffff; --desktop: #000000; --disabled: #00ff00;
+  --text: #ffffff; --paper: #000000; --muted: #00ffff; --ink: #ffffff; --ink-back: #000000;
+  --hover: #400040; --link: #ffff00; --etch: #000000;
+  color-scheme: dark;
+}
+[data-theme="contrast"] .balloon button { color: var(--text); }
 
 * { box-sizing: border-box; }
 
@@ -229,7 +262,9 @@ button.caption:active:not(:disabled) { padding: 1px 0 0 1px; }
 /* Dialogs */
 .scrim { position: fixed; inset: 0; z-index: 40; display: grid; place-items: center; }
 .dialog { width: 400px; max-width: calc(100vw - 32px); max-height: calc(100vh - 32px); }
-.dialog-body { padding: 12px; display: grid; gap: 10px; line-height: 1.35; }
+.dialog > .titlebar, .dialog-buttons { flex: none; }
+/* In a short window the body scrolls, so the buttons stay in reach. */
+.dialog-body { padding: 12px; display: grid; gap: 10px; line-height: 1.35; min-height: 0; overflow-y: auto; }
 .dialog-row { display: grid; grid-template-columns: 36px 1fr; gap: 12px; align-items: start; }
 .dialog-icon svg.px { width: 32px; height: 32px; }
 .dialog-buttons { display: flex; justify-content: flex-end; gap: 6px; padding: 0 12px 12px; }

@@ -17,6 +17,8 @@ import {
 } from './views.js';
 import { attachVisual, onVisualizerToggle, toggleVisualizer, visualizerOpen } from './visualizer.js';
 import { karaokeOpen, onKaraokeToggle, toggleKaraoke } from './karaoke.js';
+import { restoreBackdrop } from './backdrop.js';
+import { welcomeIfNew } from './welcome.js';
 
 const $ = (id) => document.getElementById(id);
 const appWindow = () => window.__TAURI__.window.getCurrentWindow();
@@ -44,6 +46,10 @@ $('win-min').addEventListener('click', () => appWindow().minimize());
 $('win-max').addEventListener('click', () => appWindow().toggleMaximize());
 $('win-close').addEventListener('click', () => appWindow().close());
 $('title-text').addEventListener('dblclick', () => appWindow().toggleMaximize());
+// Modern has no title bar; the empty parts of its top row stand in for it.
+for (const node of [$('menubar'), document.querySelector('.toolbar'), document.querySelector('.brand')]) {
+  node.addEventListener('dblclick', (e) => { if (e.target === node) appWindow().toggleMaximize(); });
+}
 $('task-button').addEventListener('click', () => appWindow().minimize());
 
 window.addEventListener('focus', () => $('titlebar').classList.remove('idle'));
@@ -61,6 +67,7 @@ async function logOn() {
     setStatus(errorText(e));
   }
   go({ name: 'home' });
+  if (session.user) await welcomeIfNew(session.user.username);
 }
 window.addEventListener('sound95:logon', logOn);
 
@@ -231,16 +238,24 @@ $('account-button').addEventListener('click', (e) => {
 
 let dragging = false;
 
+/** Modern's sliders colour in the part before the thumb. */
+const fill = (slider) => slider.style.setProperty('--fill', `${((slider.value - slider.min) / (slider.max - slider.min)) * 100}%`);
+
+/** Changes an icon only when it's a different one, so it doesn't animate in again. */
+function swapIcon(node, name) {
+  if (node.firstElementChild?.dataset.icon !== name) setIcon(node, name);
+}
+
 function renderPlayer() {
   const track = player.current;
   const playing = player.playing;
-  setIcon($('tp-play'), playing ? 'pause' : 'play');
+  swapIcon($('tp-play'), playing ? 'pause' : 'play');
   $('tp-play').setAttribute('aria-label', playing ? tr('Pause') : tr('Play'));
   for (const id of ['tp-play', 'tp-next', 'tp-prev']) $(id).disabled = !track;
   $('seek').disabled = !track;
   $('tp-shuffle').classList.toggle('on', player.shuffle);
   $('tp-repeat').classList.toggle('on', player.repeat !== 'off');
-  setIcon($('tp-repeat'), player.repeat === 'one' ? 'repeat-one' : 'repeat');
+  swapIcon($('tp-repeat'), player.repeat === 'one' ? 'repeat-one' : 'repeat');
   $('tp-repeat').title = repeatLabel();
   $('np-title').textContent = track ? track.title : tr('Nothing playing');
   $('np-title').disabled = !track;
@@ -249,7 +264,7 @@ function renderPlayer() {
   $('np-artist').textContent = track ? `${track.artist}${player.preview ? tr(' (preview)') : ''}` : '';
   $('np-artist').disabled = !track?.userUrn;
   $('np-like').disabled = !track || !session.user;
-  setIcon($('np-like'), isLiked(track) ? 'heart-on' : 'heart');
+  swapIcon($('np-like'), isLiked(track) ? 'heart-on' : 'heart');
   const art = $('np-art');
   const src = track?.artwork || '';
   if (art.dataset.src !== src || !art.firstChild) {
@@ -270,6 +285,7 @@ function renderTime() {
   $('time-now').textContent = fmtTime(pos);
   $('time-total').textContent = fmtTime(total);
   if (!dragging) $('seek').value = total ? Math.round((pos / total) * 1000) : 0;
+  fill($('seek'));
 }
 
 function renderQueue() {
@@ -314,6 +330,7 @@ $('np-artist').addEventListener('click', () => player.current?.userUrn && go({ n
 
 $('seek').addEventListener('input', () => {
   dragging = true;
+  fill($('seek'));
   $('time-now').textContent = fmtTime(durationMs() * ($('seek').value / 1000));
 });
 $('seek').addEventListener('change', () => {
@@ -322,6 +339,7 @@ $('seek').addEventListener('change', () => {
 });
 
 function renderVolume() {
+  fill($('volume'));
   setIcon($('vol-icon'), getVolume() === 0 ? 'mute' : 'speaker');
   setIcon($('tray-speaker'), getVolume() === 0 ? 'mute' : 'speaker');
 }
@@ -392,7 +410,7 @@ window.__TAURI__.event.listen('sound95:tray', ({ payload }) => {
 
 document.addEventListener('keydown', (e) => {
   const typing = ['INPUT', 'TEXTAREA'].includes(e.target.tagName);
-  if (document.querySelector('.scrim')) return;
+  if (document.querySelector('.scrim:not(.leaving)')) return;
   if (e.key === 'F5') { e.preventDefault(); refresh(); }
   if (e.ctrlKey && e.key === 'ArrowRight') { e.preventDefault(); next(); }
   if (e.ctrlKey && e.key === 'ArrowLeft') { e.preventDefault(); prev(); }
@@ -480,6 +498,7 @@ function reconnect(reason) {
 async function boot() {
   applyTheme();
   translatePage();
+  restoreBackdrop().catch(() => {});
   applyCloseToTray().catch(() => {});
   renderTray();
   const savedQueue = localStorage.getItem('sound95.queue');
@@ -505,6 +524,7 @@ async function boot() {
     const status = await loadSession();
     go({ name: 'home' });
     if (!status.logged_on) await logOn();
+    else if (session.user) await welcomeIfNew(session.user.username);
   } catch (e) {
     go({ name: 'home' });
     if (e?.code === 'session_expired') await logOn();

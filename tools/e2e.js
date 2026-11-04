@@ -75,6 +75,24 @@
     await check(() => byText('.greeting', 'Welcome back, flint95'), 'home greets the user');
     await check(() => byText('.shelf-title', 'New from People You Follow') && $$('.row').length > 8, 'home shows the feed');
 
+    // The first time in, a welcome offers a choice of look, tried on the spot.
+    const skin = () => document.documentElement.dataset.skin;
+    await check(() => byText('.welcome h1', 'Welcome to Sound95, flint95'), 'the first logon shows a welcome');
+    await log('SHOT welcome');
+    await sleep(800);
+    await clickText('.welcome button', 'Continue');
+    await check(() => $$('.look-card').length === 10, 'the welcome offers every look');
+    $('.look-card[data-look="modern"]').click();
+    const branded = () => getComputedStyle($('.brand')).display !== 'none';
+    await check(() => skin() === 'modern' && $('#tp-play svg.ic') && branded(), 'picking Modern restyles the app at once');
+    await log('SHOT welcome-modern');
+    await sleep(1000);
+    $('.look-card[data-look="light"]').click();
+    await check(() => skin() === 'classic' && $('#tp-play svg.px') && !branded(), 'picking a Windows look puts it back');
+    await clickText('.welcome button', 'Continue');
+    await clickText('.welcome button', 'Get Started');
+    await check(() => !$('.welcome') && localStorage.getItem('sound95.welcomed') === '1', 'the welcome ends and is not shown again');
+
     await clickText('.tree-item', 'Discover');
     await check(() => byText('.genres button', 'House'), 'discover lists genres');
     await check(() => byText('.shelf-title', 'Because You Played') && $$('.row').length >= 10, 'discover recommends from history');
@@ -228,6 +246,9 @@
     await sleep(3000); // the mock's unplayable tracks finish skipping
     dbl($$('.row')[0]);
     await waitFor(() => $('#np-title').textContent === 'Dial-Up Lullaby' && seconds() >= 2, 'a real track playing', 20000);
+    // Bars that follow the volume all but vanish at 1%; that's checked further down.
+    const viz = await import('./js/visualizer.js');
+    viz.setFollowsVolume(false);
     $('#viz-toggle').click();
     // A Windows build machine has no sound card, so it can only follow the loudness.
     const heard = navigator.userAgent.includes('Windows') ? /Live audio|Track loudness/ : /Live audio/;
@@ -253,6 +274,14 @@
     const litBefore = greens().join();
     await sleep(600);
     await check(() => greens().join() !== litBefore, 'bars move with the music', 3000);
+    // At 1% volume, bars that follow the volume stand much lower.
+    const average = async () => { let sum = 0; for (let i = 0; i < 10; i++) { sum += greens().length; await sleep(150); } return sum / 10; };
+    const filled = await average();
+    viz.setFollowsVolume(true);
+    await sleep(1500);
+    const followed = await average();
+    await log(`INFO bars ${Math.round(filled)} lit filling the display, ${Math.round(followed)} following the volume`);
+    await check(() => followed < filled * 0.8, 'at a low volume the bars stand lower');
     await log('SHOT visualizer');
     await sleep(6000);
     await log(`CPU-WINDOW-END`);
@@ -363,17 +392,25 @@
       await clickText('.menu-item', item);
       await waitFor(() => $('.settings'), 'the settings window');
     };
-    const choose = (radio, language) => {
-      $$('.settings input')[radio].click();
-      const box = $('.settings select');
-      box.value = language;
-      box.dispatchEvent(new Event('change', { bubbles: true }));
+    const page = (id) => $(`.dialog .tab[data-page="${id}"]`).click();
+    const pick = (select, value) => {
+      select.value = value;
+      select.dispatchEvent(new Event('change', { bubbles: true }));
+    };
+    const choose = (look, language) => {
+      page('appearance');
+      pick($('.settings select'), look);
+      page('general');
+      pick($('.settings select'), language);
     };
     await openSettings('File', 'Settings');
-    await check(() => theme() === 'light' && $$('.settings input')[0].checked, 'the light theme is the default');
+    await check(() => theme() === 'light' && $('.settings select').value === 'light', 'the light theme is the default');
+    await check(() => $$('.settings select')[0].querySelectorAll('option').length === 10, 'every look is offered');
+    page('general');
     await check(() => $$('.options input')[0].checked && !$$('.options input')[1].checked, 'closing to the tray is on and Discord is off by default');
-    choose(1, 'ru');
-    await check(() => $('.monitor.dark'), 'the monitor previews the theme');
+    choose('dark', 'ru');
+    page('appearance');
+    await check(() => $('.monitor[data-theme="dark"]'), 'the monitor previews the theme');
     await log('SHOT settings');
     await sleep(1000);
     await clickText('.dialog button', 'Cancel');
@@ -381,7 +418,7 @@
     $('#karaoke-toggle').click();
     await waitFor(() => $('.float'), 'the karaoke window');
     await openSettings('File', 'Settings');
-    choose(1, 'ru');
+    choose('dark', 'ru');
     await clickText('.dialog button', 'OK');
     await check(() => theme() === 'dark' && getComputedStyle(document.body).color === 'rgb(230, 230, 230)', 'the dark theme applies');
     await check(() => $('#menubar .menu-title').textContent === 'Файл' && $('#queue-clear').textContent !== 'Clear' && $('#search-box').placeholder !== 'Tracks, playlists, people', 'the menus and page change language');
@@ -390,12 +427,67 @@
     await log('SHOT dark');
     await sleep(1000);
     await openSettings('Файл', 'Настройка');
-    await check(() => $('.settings select').value === 'ru' && $$('.settings input')[1].checked, 'settings show the current choices');
-    choose(0, 'en');
+    const shownLook = $('.settings select').value;
+    page('general');
+    await check(() => $('.settings select').value === 'ru' && shownLook === 'dark', 'settings show the current choices');
+    choose('light', 'en');
     await clickText('.dialog button', 'OK');
     await check(() => theme() === 'light' && byText('#menubar .menu-title', 'File') && $('.float .titlebar-text').textContent === 'Karaoke', 'theme and language go back');
     $('#karaoke-toggle').click();
     await waitFor(() => !$('.float'), 'the karaoke window to close');
+
+    // Modern animates, until that's turned off.
+    await openSettings('File', 'Settings');
+    pick($('.settings select'), 'modern');
+    await clickText('.dialog button', 'OK');
+    await check(() => skin() === 'modern' && document.documentElement.dataset.motion === 'on', 'Modern animates by default');
+    await openSettings('File', 'Settings');
+    await check(() => getComputedStyle($('.scrim > .window')).animationName.includes('s95-pop-in'), 'its dialogs open with an animation');
+    await log('SHOT modern-settings');
+    await sleep(800);
+    $('.settings .options input').click();
+    pick($$('.settings select')[1], 'fast');
+    await clickText('.dialog button', 'OK');
+    await check(() => document.documentElement.dataset.motion === 'off' && !$('.scrim'), 'animations can be turned off, and dialogs close at once');
+    await openSettings('File', 'Settings');
+    await check(() => getComputedStyle($('.scrim > .window')).animationName === 'none' && $$('.settings select')[1].disabled, 'with them off nothing animates');
+    $('.settings .options input').click();
+    pick($('.settings select'), 'light');
+    await clickText('.dialog button', 'OK');
+    await check(() => skin() === 'classic' && localStorage.getItem('sound95.motion') === '1' && localStorage.getItem('sound95.motionSpeed') === 'fast', 'the animation choices are kept');
+
+    // A background of your own: a GIF that plays along with the music.
+    const TEST_GIF = 'R0lGODlhCAAGAPAAAP8AAAAAACH/C05FVFNDQVBFMi4wAwEAAAAh+QQACgAAACwAAAAACAAGAAACBoSPqct9BQAh+QQACgAAACwAAAAACAAGAIAAAP8AAAACBoSPqct9BQA7';
+    await openSettings('File', 'Settings');
+    page('background');
+    const picked = new DataTransfer();
+    picked.items.add(new File([Uint8Array.from(atob(TEST_GIF), (c) => c.charCodeAt(0))], 'dance.gif', { type: 'image/gif' }));
+    const chooser = $('.settings input[type="file"]');
+    chooser.files = picked.files;
+    chooser.dispatchEvent(new Event('change'));
+    await check(() => $('.file-name').textContent === 'dance.gif' && $('.monitor-picture'), 'a picked background shows in the preview');
+    $$('.settings .options input')[1].click();
+    await clickText('.dialog button', 'OK');
+    await check(() => document.documentElement.classList.contains('has-backdrop') && $('#backdrop canvas'), 'the background goes behind the app');
+    if ($('#tp-play').getAttribute('aria-label') === 'Play') $('#tp-play').click();
+    const shade = () => $('#backdrop canvas').getContext('2d').getImageData(0, 0, 1, 1).data[0];
+    const firstShade = shade();
+    await check(() => shade() !== firstShade, 'the GIF plays while the music does', 6000);
+    $('#tp-play').click();
+    await waitFor(() => $('#tp-play').getAttribute('aria-label') === 'Play', 'a pause');
+    await sleep(500);
+    const pausedShade = shade();
+    await sleep(1500);
+    await check(() => shade() === pausedShade, 'and stops when the music stops');
+    $('#tp-play').click();
+    await log('SHOT background');
+    await sleep(800);
+    await openSettings('File', 'Settings');
+    page('background');
+    await check(() => $('.file-name').textContent === 'dance.gif' && $$('.settings .options input')[1].checked, 'the background is remembered');
+    await clickText('.file-buttons button', 'None');
+    await clickText('.dialog button', 'OK');
+    await check(() => !document.documentElement.classList.contains('has-backdrop') && !$('#backdrop').children.length, 'the background can be taken away');
 
     $('#start-button').dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
     await check(() => $('.start-menu') && byText('.start-menu .menu-item', 'Log Off'), 'start menu');

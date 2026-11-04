@@ -1,12 +1,13 @@
 // Music visualizer, drawn from the real audio. The backend taps the app's own sound
 // and sends frequency bands; where it can't (no PipeWire), bars follow the track's
-// published loudness instead and the status bar says so.
+// published loudness instead and the status bar says so. Bars stand as tall as
+// the music is loud, at the volume it plays at, unless that's turned off in Settings.
 
 import { tr } from './i18n.js';
 import { api, paths } from './api.js';
 import { el, errorText, setStatus } from './dom.js';
 import { showMenu } from './dialogs.js';
-import { durationMs, onPlayerChange, player, positionMs } from './player.js';
+import { durationMs, getVolume, onPlayerChange, player, positionMs } from './player.js';
 import { loudness } from './waveform.js';
 import { floatWindow } from './windows.js';
 
@@ -20,6 +21,13 @@ const STALE_MS = 400;
 const DRAW_EVERY_MS = 30; // the audio arrives at 30 frames a second, so 60 would redraw the same thing
 const NO_AUDIO_AFTER_MS = 3000;
 const MODE_KEY = 'sound95.visual';
+const FOLLOW_KEY = 'sound95.vizFollow';
+const LOUDEST_KEY = 'sound95.loudest';
+// The backend shows this many dB below its reference, so a dB is this much of the height.
+const RANGE_DB = 54;
+// How fast the memory of the loudest music fades, in dB a frame: about 7 dB a minute,
+// so a quiet stretch stays quiet but a quiet album gets its height back eventually.
+const LOUDEST_FALL = 0.004;
 const PIXEL = 2;
 
 const VGA = ['#ff0000', '#ffff00', '#00ff00', '#00ffff', '#0000ff', '#ff00ff', '#ffffff'];
@@ -40,11 +48,35 @@ const audio = {
 };
 const arriving = [];
 
+let follows = (() => { try { return localStorage.getItem(FOLLOW_KEY) !== '0'; } catch { return true; } })();
+let loudest = (() => { try { return Number(localStorage.getItem(LOUDEST_KEY)) || -Infinity; } catch { return -Infinity; } })();
+
+export const followsVolume = () => follows;
+export function setFollowsVolume(on) {
+  follows = on;
+  try { localStorage.setItem(FOLLOW_KEY, on ? '1' : '0'); } catch { /* optional */ }
+}
+
+const volumeDb = () => 20 * Math.log10(Math.max(getVolume(), 0.001));
+
+/**
+ * How far to lower everything, as a share of the height. The backend scales each
+ * frame to its own loudest band, and `peak` says how loud that really was. The
+ * loudest the music itself has been lately (with the volume taken back out) fills
+ * the display at full volume, so quiet passages and a lower volume both show lower.
+ */
+function quietBy(peak) {
+  if (!follows || !Number.isFinite(peak)) return 0;
+  loudest = Math.max(peak - volumeDb(), loudest - LOUDEST_FALL);
+  return Math.min(1, Math.max(0, (loudest - peak) / RANGE_DB));
+}
+
 let capturing = false;
 let stopTimer = null;
 let drawing = false;
 let drawnAt = 0;
 const surfaces = new Set();
+const audioListeners = new Set();
 
 /* ---------- Audio ---------- */
 
@@ -61,10 +93,12 @@ function applyHeardFrames(now) {
   let frame = null;
   while (arriving.length && now - arriving[0].at >= audio.outputMs) frame = arriving.shift().payload;
   if (!frame) return;
-  audio.level = frame.level / 255;
+  const lower = quietBy(frame.peak);
+  const shrink = 10 ** ((-lower * RANGE_DB) / 20);
+  audio.level = Math.max(0, frame.level / 255 - lower);
   audio.frameAt = now;
-  frame.bands.forEach((v, i) => { audio.target[i] = v / 255; });
-  frame.wave.forEach((v, i) => { audio.waveTarget[i] = v / 127; });
+  frame.bands.forEach((v, i) => { audio.target[i] = Math.max(0, v / 255 - lower); });
+  frame.wave.forEach((v, i) => { audio.waveTarget[i] = (v / 127) * shrink; });
 }
 
 /** How far the sound you hear runs behind the sound being played. */
@@ -73,7 +107,7 @@ export const outputDelayMs = () => audio.outputMs;
 document.addEventListener('visibilitychange', () => syncCapture());
 
 function syncCapture() {
-  const want = surfaces.size > 0 && player.playing && !document.hidden;
+  const want = (surfaces.size > 0 || audioListeners.size > 0) && player.playing && !document.hidden;
   if (want) {
     clearTimeout(stopTimer);
     stopTimer = null;
@@ -88,6 +122,9 @@ function syncCapture() {
   } else if (capturing && !stopTimer) {
     // Tracks pause for a moment as they change, which shouldn't restart the tap.
     stopTimer = setTimeout(() => {
+      if (Number.isFinite(loudest)) {
+        try { localStorage.setItem(LOUDEST_KEY, String(loudest)); } catch { /* optional */ }
+      }
       capturing = false;
       stopTimer = null;
       api.visualStop();
@@ -113,7 +150,8 @@ function loadPublished() {
 function fromLoudness(now) {
   loadPublished();
   const total = durationMs();
-  const value = published && total ? published[Math.floor((positionMs() / total) * published.length)] || 0 : 0.4;
+  const loudness = published && total ? published[Math.floor((positionMs() / total) * published.length)] || 0 : 0.4;
+  const value = follows ? loudness * Math.max(0, 1 + volumeDb() / RANGE_DB) : loudness;
   for (let i = 0; i < BANDS; i++) {
     const shape = 1 - (i / BANDS) * 0.6;
     const ripple = 0.65 + 0.35 * Math.sin(i * 0.9 + now / 170) * Math.sin(i * 0.37 - now / 310);
@@ -475,6 +513,8 @@ function frame(now) {
     if (canvas.height !== h) canvas.height = h;
     MODES[mode].draw(canvas.getContext('2d'), w, h, memory);
   }
+  const heard = { level: audio.level, bass: bass(), playing: player.playing };
+  for (const fn of audioListeners) fn(heard);
   if (going) requestAnimationFrame(frame);
   else drawing = false;
 }
@@ -494,6 +534,13 @@ export function attachVisual(canvas, { mode = 'bars', pixel = 1 } = {}) {
   surfaces.add(surface);
   syncCapture();
   return surface;
+}
+
+/** Calls `fn({ level, bass, playing })` every frame. Returns a function that stops it. */
+export function onAudio(fn) {
+  audioListeners.add(fn);
+  syncCapture();
+  return () => { audioListeners.delete(fn); syncCapture(); };
 }
 
 /* ---------- The window ---------- */

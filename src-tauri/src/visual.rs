@@ -43,6 +43,9 @@ struct Frame {
     bands: Vec<u8>,
     wave: Vec<i8>,
     level: u8,
+    /// What the bands are scaled against: the loudest band lately, in dB. Bands
+    /// fill the display at any volume, so this is what tells loud from quiet.
+    peak: f32,
     /// How long sound takes to reach your ears after it leaves the app.
     output_ms: u32,
 }
@@ -168,6 +171,7 @@ fn run(app: AppHandle, stop: Arc<AtomicBool>) {
             bands,
             wave,
             level,
+            peak: analyser.peak,
             output_ms: heard.output_ms,
         };
         if app.emit_to("main", EVENT, frame).is_err() {
@@ -238,6 +242,20 @@ mod tests {
         let (loud, _, _) = Analyser::new().frame(&tone(1000.0, 0.5));
         let (quiet, _, _) = Analyser::new().frame(&tone(1000.0, 0.005));
         assert_eq!(loud.iter().max(), quiet.iter().max());
+    }
+
+    #[test]
+    fn the_peak_tells_loud_from_quiet() {
+        let mut loud = Analyser::new();
+        let mut quiet = Analyser::new();
+        loud.frame(&tone(1000.0, 0.5));
+        quiet.frame(&tone(1000.0, 0.005));
+        assert!(
+            (loud.peak - quiet.peak - 40.0).abs() < 1.0,
+            "{} vs {}",
+            loud.peak,
+            quiet.peak
+        );
     }
 
     #[test]

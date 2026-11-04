@@ -30,6 +30,8 @@ jobs:
           workspaces: src-tauri
       - run: node ../tools/check-lang.mjs
         if: runner.os == 'Linux'
+      - run: node ../tools/check-gif.mjs
+        if: runner.os == 'Linux'
       - run: cargo clippy --locked --all-targets -- -D warnings
       - run: cargo test --locked
 
