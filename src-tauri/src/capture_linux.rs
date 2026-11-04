@@ -5,10 +5,10 @@
 use super::{Heard, FFT};
 use serde_json::Value;
 use std::{
-    collections::VecDeque,
+    collections::{HashMap, VecDeque},
     fs,
-    io::Read,
-    process::{Child, Command, Stdio},
+    io::{BufReader, Read},
+    process::{Child, ChildStdout, Command, Stdio},
     sync::{
         atomic::{AtomicBool, AtomicU32, Ordering},
         Arc, Mutex,
@@ -17,8 +17,8 @@ use std::{
     time::Duration,
 };
 
-/// Each new track opens a new stream, so the list has to be kept fresh.
-const SCAN: Duration = Duration::from_millis(1000);
+/// How long to wait before starting pw-dump again, as when PipeWire restarts.
+const RESTART: Duration = Duration::from_millis(1000);
 const MAX_TAPS: usize = 4;
 const GRAPH_RATE: f64 = 48_000.0;
 const GRAPH_QUANTUM: f64 = 1024.0;
@@ -62,11 +62,8 @@ struct Stream {
     node: u64,
 }
 
-/// The running playback streams in a `pw-dump` listing.
-fn our_streams(dump: &Value, ours: impl Fn(u32) -> bool) -> Vec<Stream> {
-    let Some(objects) = dump.as_array() else {
-        return Vec::new();
-    };
+/// The running playback streams among the graph's objects.
+fn our_streams(objects: &[&Value], ours: impl Fn(u32) -> bool) -> Vec<Stream> {
     objects
         .iter()
         .filter_map(|object| {
@@ -97,8 +94,7 @@ fn latency_ms(latency: &Value) -> f64 {
 /// The delay of the device these streams play on. Bluetooth is the big one, at
 /// around 300 ms, and nothing in the audio itself shows it. None when they play
 /// on nothing, as when paused or between tracks, which says nothing about the device.
-fn output_delay_ms(dump: &Value, streams: &[Stream]) -> Option<u32> {
-    let objects = dump.as_array()?;
+fn output_delay_ms(objects: &[&Value], streams: &[Stream]) -> Option<u32> {
     let infos = |kind: &'static str| {
         objects
             .iter()
@@ -131,16 +127,98 @@ fn measured(delay: Option<u32>) {
     }
 }
 
-/// Streams to tap, and the delay of the device they play on.
-fn scan() -> Option<(Vec<u64>, Option<u32>)> {
-    let output = Command::new("pw-dump")
-        .stderr(Stdio::null())
-        .output()
-        .ok()?;
-    let dump = serde_json::from_slice(&output.stdout).ok()?;
-    let streams = our_streams(&dump, is_ours);
-    let delay = output_delay_ms(&dump, &streams);
-    Some((streams.iter().map(|s| s.serial).collect(), delay))
+/// The graph as `pw-dump --monitor` tells it, by object id.
+#[derive(Default)]
+struct Graph(HashMap<u64, Value>);
+
+impl Graph {
+    /// A changed object comes whole, and one that's gone comes with a null info.
+    /// Metadata has no info at all, so only a null means gone.
+    fn apply(&mut self, batch: Value) {
+        let Value::Array(objects) = batch else {
+            return;
+        };
+        for object in objects {
+            let Some(id) = object["id"].as_u64() else {
+                continue;
+            };
+            if object.get("info").is_some_and(Value::is_null) {
+                self.0.remove(&id);
+            } else {
+                self.0.insert(id, object);
+            }
+        }
+    }
+
+    /// Streams to tap, and the delay of the device they play on.
+    fn targets(&self, ours: impl Fn(u32) -> bool) -> (Vec<u64>, Option<u32>) {
+        let objects: Vec<&Value> = self.0.values().collect();
+        let streams = our_streams(&objects, ours);
+        let mut serials: Vec<u64> = streams.iter().map(|s| s.serial).collect();
+        serials.sort_unstable();
+        (serials, output_delay_ms(&objects, &streams))
+    }
+}
+
+/// What the capture shares with the thread that follows the graph.
+#[derive(Default)]
+struct Watch {
+    /// Serials of the streams to tap.
+    wanted: Mutex<Vec<u64>>,
+    /// The running pw-dump, kept here so closing the capture can end it.
+    dump: Mutex<Option<Child>>,
+    closed: AtomicBool,
+}
+
+impl Watch {
+    /// Starts pw-dump, unless the capture closed meanwhile.
+    fn start(&self) -> Option<ChildStdout> {
+        let mut child = Command::new("pw-dump")
+            .arg("--monitor")
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn()
+            .ok()?;
+        let stdout = child.stdout.take();
+        let mut dump = self.dump.lock().expect("dump");
+        *dump = Some(child);
+        if self.closed.load(Ordering::Relaxed) {
+            drop(dump);
+            self.end();
+            return None;
+        }
+        stdout
+    }
+
+    fn end(&self) {
+        if let Some(mut child) = self.dump.lock().expect("dump").take() {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+    }
+
+    /// Each new track opens a new stream. pw-dump reports every change as it
+    /// happens, so the stream is tapped as soon as it plays, without dumping the
+    /// whole graph over and over to look for it.
+    fn follow(&self, stop: &AtomicBool) {
+        while !stop.load(Ordering::Relaxed) && !self.closed.load(Ordering::Relaxed) {
+            if let Some(stdout) = self.start() {
+                let mut graph = Graph::default();
+                let batches = serde_json::Deserializer::from_reader(BufReader::new(stdout))
+                    .into_iter::<Value>();
+                for batch in batches.map_while(Result::ok) {
+                    graph.apply(batch);
+                    let (serials, delay) = graph.targets(is_ours);
+                    *self.wanted.lock().expect("wanted") = serials;
+                    measured(delay);
+                }
+                self.end();
+                self.wanted.lock().expect("wanted").clear();
+            }
+            thread::sleep(RESTART);
+        }
+    }
 }
 
 struct Tap {
@@ -213,32 +291,34 @@ pub fn available() -> bool {
 }
 
 pub struct Capture {
-    targets: Arc<Mutex<Vec<u64>>>,
+    watch: Arc<Watch>,
     taps: Vec<Tap>,
+}
+
+impl Drop for Capture {
+    fn drop(&mut self) {
+        // pw-dump only writes when the graph changes, so its reader can't be
+        // relied on to notice the capture closing.
+        self.watch.closed.store(true, Ordering::Relaxed);
+        self.watch.end();
+    }
 }
 
 impl Capture {
     pub fn open(stop: Arc<AtomicBool>) -> Self {
-        let targets = Arc::new(Mutex::new(Vec::new()));
-        let found = targets.clone();
-        // pw-dump takes long enough to drop a frame, so it runs apart from the drawing.
-        thread::spawn(move || {
-            while !stop.load(Ordering::Relaxed) {
-                if let Some((serials, delay)) = scan() {
-                    *found.lock().expect("targets") = serials;
-                    measured(delay);
-                }
-                thread::sleep(SCAN);
-            }
-        });
+        let watch = Arc::new(Watch::default());
+        let follower = watch.clone();
+        // Reading the graph takes long enough to drop a frame, so it runs apart
+        // from the drawing.
+        thread::spawn(move || follower.follow(&stop));
         Self {
-            targets,
+            watch,
             taps: Vec::new(),
         }
     }
 
     pub(super) fn heard(&mut self) -> Heard {
-        let wanted = self.targets.lock().expect("targets").clone();
+        let wanted = self.watch.wanted.lock().expect("wanted").clone();
         self.taps
             .retain_mut(|t| wanted.contains(&t.serial) && matches!(t.child.try_wait(), Ok(None)));
         for serial in wanted {
@@ -276,6 +356,10 @@ mod tests {
     use super::*;
     use serde_json::json;
 
+    fn all(dump: &Value) -> Vec<&Value> {
+        dump.as_array().expect("a listing").iter().collect()
+    }
+
     #[test]
     fn only_our_running_streams_are_tapped() {
         let stream = |id: u64, pid: u64, class: &str, state: &str| {
@@ -292,7 +376,7 @@ mod tests {
             { "info": { "props": {} } },
             { "type": "PipeWire:Interface:Link" },
         ]);
-        let found = our_streams(&dump, |pid| pid == 10);
+        let found = our_streams(&all(&dump), |pid| pid == 10);
         assert_eq!(found.len(), 1);
         assert_eq!((found[0].serial, found[0].node), (101, 1));
     }
@@ -328,9 +412,9 @@ mod tests {
             ),
         ]);
         let ours = [Stream { serial: 9, node: 1 }];
-        assert_eq!(output_delay_ms(&dump, &ours), Some(313));
+        assert_eq!(output_delay_ms(&all(&dump), &ours), Some(313));
         // Paused, or between tracks.
-        assert_eq!(output_delay_ms(&dump, &[]), None);
+        assert_eq!(output_delay_ms(&all(&dump), &[]), None);
         // Wired devices count in samples and buffers instead.
         let samples = json!([
             link(1, 50),
@@ -342,9 +426,36 @@ mod tests {
                 ])
             )
         ]);
-        assert_eq!(output_delay_ms(&samples, &ours), Some(71));
+        assert_eq!(output_delay_ms(&all(&samples), &ours), Some(71));
         // A device that doesn't give its delay adds none.
-        assert_eq!(output_delay_ms(&json!([link(1, 50)]), &ours), Some(0));
+        assert_eq!(output_delay_ms(&all(&json!([link(1, 50)])), &ours), Some(0));
+    }
+
+    #[test]
+    fn the_graph_follows_what_pw_dump_reports() {
+        let stream = |state: &str| {
+            json!({ "id": 7, "type": "PipeWire:Interface:Node", "info": { "state": state, "props": {
+                "media.class": "Stream/Output/Audio", "object.serial": 107, "application.process.id": 10,
+            } } })
+        };
+        let link = json!({ "id": 8, "type": "PipeWire:Interface:Link", "info": { "output-node-id": 7, "input-node-id": 50 } });
+        let port = json!({ "id": 9, "type": "PipeWire:Interface:Port", "info": {
+            "direction": "input", "props": { "node.id": 50 },
+            "params": { "Latency": [{ "direction": "Input", "maxNs": 314000000.0 }] },
+        } });
+        let metadata = json!({ "id": 3, "type": "PipeWire:Interface:Metadata", "metadata": [] });
+        let ours = |pid| pid == 10;
+        let mut graph = Graph::default();
+        graph.apply(json!([stream("idle"), port, metadata]));
+        assert_eq!(graph.targets(ours), (vec![], None));
+        graph.apply(json!([stream("running"), link]));
+        assert_eq!(graph.targets(ours), (vec![107], Some(314)));
+        // Both gone again.
+        graph.apply(json!([{ "id": 8, "info": null }, { "id": 7, "info": null }]));
+        assert_eq!(graph.targets(ours), (vec![], None));
+        assert!(graph.0.contains_key(&3) && graph.0.contains_key(&9));
+        graph.apply(json!({ "not": "a batch" }));
+        assert_eq!(graph.0.len(), 2);
     }
 
     #[test]
