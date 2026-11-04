@@ -81,12 +81,14 @@ fn has_element(element: &str) -> bool {
         .is_ok_and(|status| status.success())
 }
 
-fn ready() -> bool {
-    ["hlsdemux2", "hlsdemux"].iter().any(|e| has_element(e))
-        && has_element("qtdemux")
-        && ["avdec_aac", "fdkaacdec", "faad"]
-            .iter()
-            .any(|e| has_element(e))
+/// Without gst-inspect-1.0 there's no telling, and Debian keeps it out of the
+/// plug-in packages. Playback gets to try rather than asking for a password on
+/// every launch to install what's already there.
+fn ready(can_check: bool, has: impl Fn(&str) -> bool) -> bool {
+    !can_check
+        || (["hlsdemux2", "hlsdemux"].iter().any(|e| has(e))
+            && has("qtdemux")
+            && ["avdec_aac", "fdkaacdec", "faad"].iter().any(|e| has(e)))
 }
 
 fn detect(installed: impl Fn(&str) -> bool) -> Option<Installer> {
@@ -104,7 +106,7 @@ pub fn status() -> AudioStatus {
     }
     let installer = detect(on_path);
     AudioStatus {
-        ready: ready(),
+        ready: ready(on_path("gst-inspect-1.0"), has_element),
         can_install: installer.is_some() && on_path("pkexec"),
         command: installer.map(|i| format!("sudo {} {}", i.name, i.args.join(" "))),
     }
@@ -150,6 +152,16 @@ mod tests {
         assert_eq!(detect(|p| p == "pacman").unwrap().name, "pacman");
         assert_eq!(detect(|p| p == "apt-get").unwrap().name, "apt-get");
         assert!(detect(|_| false).is_none());
+    }
+
+    #[test]
+    fn plug_ins_are_only_missing_when_the_checker_says_so() {
+        let found = |e: &str| ["hlsdemux2", "qtdemux", "avdec_aac"].contains(&e);
+        assert!(ready(true, found));
+        assert!(!ready(true, |e| e != "qtdemux"));
+        assert!(!ready(true, |_| false));
+        // No gst-inspect-1.0 to ask.
+        assert!(ready(false, |_| false));
     }
 
     #[test]
