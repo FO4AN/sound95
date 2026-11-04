@@ -770,9 +770,19 @@ async fn body(req: RequestBuilder) -> Result<(StatusCode, Option<u64>, Vec<u8>),
     Ok((status, retry, bytes))
 }
 
-async fn json(req: RequestBuilder) -> Result<Value, reqwest::Error> {
-    let (_, _, bytes) = body(req).await?;
-    Ok(serde_json::from_slice(&bytes).unwrap_or(Value::Null))
+/// None when the site didn't really answer: no reply, an error status, or a body
+/// that isn't JSON, like a Cloudflare challenge page.
+async fn json(req: RequestBuilder) -> Option<Value> {
+    let (status, _, bytes) = body(req).await.ok()?;
+    if !status.is_success() {
+        return None;
+    }
+    let value: Value = serde_json::from_slice(&bytes).ok()?;
+    // NetEase answers 200 with {"code": -460} or 405 when it refuses or rate-limits.
+    if value["code"].as_i64().is_some_and(|code| code != 200) {
+        return None;
+    }
+    Some(value)
 }
 
 fn finished(
@@ -925,7 +935,12 @@ fn netease_request(path: &str) -> RequestBuilder {
         .header(header::REFERER, "https://music.163.com/")
 }
 
-async fn netease_song(q: &Query, song: &Value, found: &mut Vec<Lyrics>) -> Option<()> {
+async fn netease_song(
+    q: &Query,
+    song: &Value,
+    found: &mut Vec<Lyrics>,
+    failed: &mut bool,
+) -> Option<()> {
     let id = song["id"].as_u64()?;
     let title = song["name"].as_str()?;
     let artists: Vec<&str> = song["artists"]
@@ -944,7 +959,10 @@ async fn netease_song(q: &Query, song: &Value, found: &mut Vec<Lyrics>) -> Optio
         ("kv", "0"),
         ("tv", "0"),
     ]);
-    let lyric = json(req).await.ok()?;
+    let Some(lyric) = json(req).await else {
+        *failed = true;
+        return None;
+    };
     if lyric["pureMusic"].as_bool() == Some(true) || lyric["nolyric"].as_bool() == Some(true) {
         return None;
     }
@@ -973,7 +991,7 @@ async fn netease(q: &Query, found: &mut Vec<Lyrics>, failed: &mut bool) {
             ("limit", "8"),
             ("s", text.as_str()),
         ]);
-        let Ok(results) = json(req).await else {
+        let Some(results) = json(req).await else {
             *failed = true;
             continue;
         };
@@ -991,7 +1009,7 @@ async fn netease(q: &Query, found: &mut Vec<Lyrics>, failed: &mut bool) {
                 continue;
             }
             tried += 1;
-            netease_song(q, song, found).await;
+            netease_song(q, song, found, failed).await;
         }
         if good_enough(found) {
             return;
@@ -1014,7 +1032,7 @@ async fn genius(q: &Query, found: &mut Vec<Lyrics>, failed: &mut bool) {
         let req = http()
             .get(format!("{site}/api/search/multi"))
             .query(&[("per_page", "5"), ("q", text.as_str())]);
-        let Ok(results) = json(req).await else {
+        let Some(results) = json(req).await else {
             *failed = true;
             continue;
         };
@@ -1364,6 +1382,69 @@ mod tests {
         let lines = parse_plain(&genius_lyrics(html));
         let text: Vec<&str> = lines.iter().map(|l| l.text.as_str()).collect();
         assert_eq!(text, ["It's the first line", "second & last", "third"]);
+    }
+
+    /// Answers each request with the first reply whose path prefix matches.
+    fn serve(replies: Vec<(&'static str, u16, &'static str)>) -> String {
+        use std::io::{Read, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
+        let base = format!("http://{}", listener.local_addr().expect("address"));
+        std::thread::spawn(move || {
+            for mut stream in listener.incoming().flatten() {
+                let mut buf = [0u8; 8192];
+                let read = stream.read(&mut buf).unwrap_or(0);
+                let head = String::from_utf8_lossy(&buf[..read]).to_string();
+                let path = head.split_whitespace().nth(1).unwrap_or("").to_string();
+                let (status, text) = replies
+                    .iter()
+                    .find(|(prefix, _, _)| path.starts_with(prefix))
+                    .map_or((404, ""), |(_, status, text)| (*status, *text));
+                let reply = format!(
+                    "HTTP/1.1 {status} X\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{text}",
+                    text.len()
+                );
+                let _ = stream.write_all(reply.as_bytes());
+            }
+        });
+        base
+    }
+
+    // The mock hosts only stand in for the real ones in debug builds.
+    #[cfg(debug_assertions)]
+    #[tokio::test]
+    async fn refusals_are_not_taken_for_no_lyrics() {
+        let request = || Request {
+            title: "Artist - Song".into(),
+            artist: "x".into(),
+            duration_ms: 200_000,
+            exact: false,
+            everything: false,
+            speed_title: None,
+        };
+        let refusing = serve(vec![
+            ("/lrclib/", 200, "[]"),
+            ("/netease/", 200, r#"{"code":-460,"message":"Cheating"}"#),
+            ("/genius/", 403, "<html>Just a moment...</html>"),
+        ]);
+        std::env::set_var("SOUND95_LYRICS_BASE", &refusing);
+        let refused = search(request()).await;
+        assert_eq!(refused.err().map(|e| e.code), Some("network"));
+        let broken = serve(vec![
+            ("/lrclib/", 200, "[]"),
+            ("/netease/", 503, "<html>Service Unavailable</html>"),
+            ("/genius/", 200, r#"{"response":{"sections":[]}}"#),
+        ]);
+        std::env::set_var("SOUND95_LYRICS_BASE", &broken);
+        assert!(search(request()).await.is_err());
+        // Every site answering with nothing is a real "no lyrics".
+        let empty = serve(vec![
+            ("/lrclib/", 200, "[]"),
+            ("/netease/", 200, r#"{"result":{"songs":[]},"code":200}"#),
+            ("/genius/", 200, r#"{"response":{"sections":[]}}"#),
+        ]);
+        std::env::set_var("SOUND95_LYRICS_BASE", &empty);
+        assert!(search(request()).await.is_ok_and(|found| found.is_empty()));
+        std::env::remove_var("SOUND95_LYRICS_BASE");
     }
 
     #[test]
