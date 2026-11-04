@@ -344,7 +344,8 @@ pub fn run() {
             match event {
                 WindowEvent::CloseRequested { api, .. } => {
                     let tray = window.try_state::<tray::Tray>();
-                    if tray.is_some_and(|tray| tray.closes_to_tray()) {
+                    // With no tray on screen, closing quits as it does without one.
+                    if tray.is_some_and(|tray| tray.closes_to_tray()) && tray::host_present() {
                         api.prevent_close();
                         let _ = window.hide();
                     }
