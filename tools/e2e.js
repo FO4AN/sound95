@@ -388,6 +388,7 @@
     // Theme and language, put back afterwards.
     const theme = () => document.documentElement.dataset.theme;
     const openSettings = async (file, item) => {
+      await waitFor(() => !$('.scrim'), 'the last dialog to go');
       byText('#menubar .menu-title', file).dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
       await clickText('.menu-item', item);
       await waitFor(() => $('.settings'), 'the settings window');

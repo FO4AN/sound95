@@ -32,8 +32,11 @@ export function applyMotion({ on = motionOn(), speed = motionSpeed() } = {}) {
     localStorage.setItem(SPEED_KEY, speed);
   } catch { /* optional */ }
   const root = document.documentElement;
-  root.dataset.motion = on && root.dataset.skin === 'modern' ? 'on' : 'off';
+  const animates = on && root.dataset.skin === 'modern';
+  root.dataset.motion = animates ? 'on' : 'off';
   root.style.setProperty('--speed', String(SPEEDS[speed] ?? 1));
+  // Whatever was on its way out has no animation left to finish, so it goes now.
+  if (!animates) document.querySelectorAll('.leaving').forEach((node) => node.remove());
 }
 
 /**
