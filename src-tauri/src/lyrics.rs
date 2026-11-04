@@ -202,15 +202,27 @@ fn is_noise(inner: &str) -> bool {
     NOISE.iter().any(|n| lower.contains(n))
 }
 
+/// Where a credit starts: " prod. x", " feat y", " @handle". A mark only counts as a
+/// whole word with a name after it, so "BIRDS OF A FEATHER" and "Little Feat" stay whole.
+fn credit_at(lower: &str) -> Option<usize> {
+    const MARKS: &[&str] = &["prod", "prodby", "produced", "feat", "featuring", "ft"];
+    lower.match_indices(' ').map(|(at, _)| at).find(|&at| {
+        let rest = &lower[at + 1..];
+        if rest.starts_with(['@', '#']) {
+            return true;
+        }
+        let end = rest
+            .find(|c: char| !c.is_alphanumeric())
+            .unwrap_or(rest.len());
+        MARKS.contains(&&rest[..end]) && !rest[end..].trim_start_matches(['.', ':', ' ']).is_empty()
+    })
+}
+
 /// Cuts credits and file names off the end: "song prod. x", "song.mp3", "song @handle".
 fn clean(s: &str) -> String {
     let mut text = drop_brackets(s, |inner| !is_noise(inner));
     let lower = text.to_lowercase();
-    let cut = [" prod", " feat", " ft.", " ft ", " @", " #"]
-        .iter()
-        .filter_map(|mark| lower.find(mark))
-        .min();
-    if let Some(at) = cut {
+    if let Some(at) = credit_at(&lower) {
         // `lower` can differ in length from the original, so re-find the boundary.
         let chars = lower[..at].chars().count();
         text = text.chars().take(chars).collect();
@@ -352,36 +364,62 @@ fn similar(a: &str, b: &str) -> i32 {
     i32::from(close || (inside && short * 4 >= long * 3))
 }
 
-fn artist_parts(s: &str) -> Vec<&str> {
-    s.split([',', '&', '/', '、'])
-        .flat_map(|part| part.split(" x "))
-        .flat_map(|part| part.split(" feat"))
-        .map(str::trim)
+/// Each name in a credit: "A & B (Ft. C)", "A ft. B", "A X B".
+fn artist_parts(s: &str) -> Vec<String> {
+    // A bracket opens a feature as often as a comma does.
+    let mut parts = vec![s.to_lowercase().replace(['(', ')', '[', ']'], ", ")];
+    for sep in [
+        ",",
+        "&",
+        "/",
+        "、",
+        "+",
+        " x ",
+        " feat.",
+        " feat ",
+        " featuring ",
+        " ft.",
+        " ft ",
+    ] {
+        parts = parts
+            .iter()
+            .flat_map(|part| part.split(sep))
+            .map(str::to_string)
+            .collect();
+    }
+    parts
+        .iter()
+        .map(|part| part.trim().to_string())
         .filter(|part| !part.is_empty())
         .collect()
 }
 
 fn same_artist(a: &str, b: &str) -> i32 {
-    let whole = similar(a, b);
+    let theirs = artist_parts(b);
     artist_parts(a)
         .iter()
-        .flat_map(|x| artist_parts(b).into_iter().map(move |y| similar(x, y)))
+        .flat_map(|x| theirs.iter().map(move |y| similar(x, y)))
         .max()
         .unwrap_or(0)
-        .max(whole)
+        .max(similar(a, b))
 }
 
 /// None if this isn't the song. A name match needs the artist too, unless the
 /// length matches so closely that it has to be the same recording.
 fn match_score(q: &Query, title: &str, artist: &str, off_by: Option<f64>) -> Option<i32> {
     let lower = title.to_lowercase();
-    if NOT_THE_SONG.iter().any(|word| lower.contains(word)) {
-        return None;
-    }
     let same_length = off_by.is_some_and(|d| d.abs() <= 2.0);
     q.pairs
         .iter()
         .filter_map(|(a, t)| {
+            // "Song (Karaoke)" isn't the song, but Drake's "Karaoke" is.
+            let asked = t.to_lowercase();
+            if NOT_THE_SONG
+                .iter()
+                .any(|word| lower.contains(word) && !asked.contains(word))
+            {
+                return None;
+            }
             // Genius adds a translation: "ГОША И РОМА (GOSHA AND ROMA)".
             let names = similar(t, title).max(similar(t, &drop_brackets(title, |_| false)));
             let people = same_artist(a, artist);
@@ -1110,6 +1148,53 @@ mod tests {
     }
 
     #[test]
+    fn features_are_split_off_artists() {
+        assert_eq!(
+            same_artist("Kendrick Lamar", "Kendrick Lamar (Ft. Drake)"),
+            2
+        );
+        assert_eq!(same_artist("Chief Keef", "Chief Keef ft. Lil Reese"), 2);
+        assert_eq!(same_artist("Chief Keef", "Chief Keef Feat. Lil Reese"), 2);
+        assert_eq!(same_artist("Chief Keef", "Chief Keef X Lil Reese"), 2);
+        assert_eq!(
+            same_artist("Lil Pump", "Kanye West & Lil Pump (Ft. Adele Givens)"),
+            2
+        );
+        assert!(same_artist("Lil Nas X", "Lil Nas X (Ft. Billy Ray Cyrus)") > 0);
+        assert_eq!(same_artist("Simon & Garfunkel", "Simon & Garfunkel"), 2);
+        assert_eq!(same_artist("Drake", "Future"), 0);
+        assert_eq!(
+            same_artist("Interscope Records", "Travis Scott (Ft. Drake)"),
+            0
+        );
+    }
+
+    #[test]
+    fn credits_are_cut_only_as_whole_words() {
+        assert_eq!(clean("The Prodigy"), "The Prodigy");
+        assert_eq!(clean("Little Feat"), "Little Feat");
+        assert_eq!(clean("My Feature"), "My Feature");
+        assert_eq!(clean("Song Product"), "Song Product");
+        for credited in [
+            "Song prod. x",
+            "Song prod by x",
+            "Song produced by x",
+            "Song featuring Y",
+            "Song feat.y",
+            "Song ft. y",
+            "Song ft y",
+            "Song prodby x",
+            "Song @handle",
+        ] {
+            assert_eq!(clean(credited), "Song", "{credited}");
+        }
+        let pairs = guesses("BIRDS OF A FEATHER", "Billie Eilish");
+        assert_eq!(pairs[0], pair("Billie Eilish", "BIRDS OF A FEATHER"));
+        let query = q(pairs, 210.0);
+        assert!(match_score(&query, "BIRDS OF A FEATHER", "Billie Eilish", Some(0.0)).is_some());
+    }
+
+    #[test]
     fn wrong_songs_are_turned_down() {
         let query = q(vec![pair("lungskull", "me")], 86.0);
         assert!(match_score(&query, "me", "lungskull", Some(0.0)).is_some());
@@ -1126,6 +1211,19 @@ mod tests {
             None
         )
         .is_some());
+        // A song named for one of those words is still the song.
+        let karaoke = q(vec![pair("Drake", "Karaoke")], 228.0);
+        assert!(match_score(&karaoke, "Karaoke", "Drake", Some(0.0)).is_some());
+        let acapella = q(vec![pair("Kelis", "Acapella")], 200.0);
+        assert!(match_score(&acapella, "Acapella", "Kelis", None).is_some());
+        let hotline = q(vec![pair("Drake", "Hotline Bling")], 267.0);
+        assert!(match_score(
+            &hotline,
+            "Hotline Bling (Karaoke Version)",
+            "Drake",
+            Some(0.0)
+        )
+        .is_none());
         let instrumental = q(vec![pair("alex g", "sarah")], 145.0);
         assert!(match_score(
             &instrumental,
