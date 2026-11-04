@@ -178,17 +178,20 @@ fn drop_brackets(s: &str, keep: impl Fn(&str) -> bool) -> String {
     let mut rest = s;
     while let Some((at, open)) = rest.char_indices().find(|(_, c)| closing(*c).is_some()) {
         let after = at + open.len_utf8();
-        let Some(end) = rest[after..].find(closing(open).expect("is a bracket")) else {
+        let close = closing(open).expect("is a bracket");
+        let Some(end) = rest[after..].find(close) else {
             break;
         };
+        // '】' takes three bytes, so step over the closing bracket by its real length.
+        let stop = after + end + close.len_utf8();
         let inner = &rest[after..after + end];
         out.push_str(&rest[..at]);
         if keep(inner) {
-            out.push_str(&rest[at..after + end + 1]);
+            out.push_str(&rest[at..stop]);
         } else {
             out.push(' ');
         }
-        rest = &rest[after + end + 1..];
+        rest = &rest[stop..];
     }
     out.push_str(rest);
     out
@@ -1082,6 +1085,17 @@ mod tests {
         let pairs = guesses("I KNOW(время 5 утра)", "widee");
         assert!(pairs.contains(&pair("widee", "I KNOW(время 5 утра)")));
         assert!(pairs.contains(&pair("widee", "I KNOW")));
+    }
+
+    #[test]
+    fn full_width_brackets_do_not_panic() {
+        assert!(guesses("【MV】Song Name", "Artist").contains(&pair("Artist", "Song Name")));
+        assert_eq!(
+            guesses("Artist - Song【Free DL】", "x")[0],
+            pair("Artist", "Song")
+        );
+        let query = q(vec![pair("Artist", "Song")], 100.0);
+        assert!(match_score(&query, "Song【Live】", "Artist", None).is_some());
     }
 
     #[test]
