@@ -524,9 +524,11 @@ function trackLyrics(track) {
   return body;
 }
 
-async function trackView(route) {
+async function trackView(route, alive) {
   const tab = route.tab || 'details';
   const track = trackDetails(await api.get(paths.track(route.urn)));
+  // A page left before it loaded would only subscribe to events and fetch for nothing.
+  if (!alive()) return el('div');
   const blocked = track.access === 'blocked';
   const isCurrent = () => player.current?.urn === track.urn;
   const play = () => {
@@ -544,12 +546,12 @@ async function trackView(route) {
     clear(playToggle, icon(pausing ? 'pause' : 'play'), pausing ? tr('Pause') : tr('Play'));
   };
   showPlay();
-  whileShown(playToggle, onPlayerChange, showPlay);
+  whileShown(playToggle, onPlayerChange, showPlay, alive);
 
   const like = el('button', { disabled: !session.user, onClick: () => toggleLike(track) });
   const showLike = () => clear(like, icon(isLiked(track) ? 'heart-on' : 'heart'), isLiked(track) ? tr('Liked') : tr('Like'));
   showLike();
-  whileShown(like, onSessionChange, showLike);
+  whileShown(like, onSessionChange, showLike, alive);
 
   const uploader = el('button', {
     class: 'link',

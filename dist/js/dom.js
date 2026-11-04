@@ -20,14 +20,18 @@ export function clear(node, ...children) {
   node.replaceChildren(...children.flat(Infinity).filter(Boolean));
 }
 
-/** Runs `fn` on each event from `subscribe`, until `node` has left the page. */
-export function whileShown(node, subscribe, fn) {
+/**
+ * Runs `fn` on each event from `subscribe`, until `node` has left the page. `alive`
+ * says whether the page it belongs to may still be shown, so a page dropped while
+ * loading stops listening too.
+ */
+export function whileShown(node, subscribe, fn, alive = () => true) {
   let shown = false;
   const stop = subscribe(() => {
     if (node.isConnected) {
       shown = true;
       fn();
-    } else if (shown) {
+    } else if (shown || !alive()) {
       stop();
     }
   });
