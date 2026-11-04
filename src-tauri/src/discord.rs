@@ -95,36 +95,79 @@ fn show(client: &mut DiscordIpcClient, playing: Option<&Playing>) -> bool {
     true
 }
 
-fn run(id: &str, updates: mpsc::Receiver<Option<Playing>>) {
-    let mut client: Option<DiscordIpcClient> = None;
-    let mut wanted = None;
-    let mut stale = false;
-    loop {
-        match updates.recv_timeout(RETRY) {
-            Ok(playing) => {
-                stale = wanted != playing;
-                wanted = playing;
+enum Msg {
+    Show(Option<Playing>),
+    Off,
+}
+
+/// What the page last asked for.
+#[derive(Default)]
+struct Wanted {
+    on: bool,
+    playing: Option<Playing>,
+    stale: bool,
+}
+
+impl Wanted {
+    fn take(&mut self, msg: Msg) {
+        match msg {
+            Msg::Show(playing) => {
+                self.on = true;
+                self.stale |= self.playing != playing;
+                self.playing = playing;
             }
-            Err(RecvTimeoutError::Timeout) => {}
+            Msg::Off => *self = Self::default(),
+        }
+    }
+}
+
+fn run(id: &str, retry: Duration, updates: mpsc::Receiver<Msg>) {
+    let mut client: Option<DiscordIpcClient> = None;
+    let mut wanted = Wanted::default();
+    // Whether the connection has worked, so a failure means Discord went away.
+    let mut proven = false;
+    let mut wait = retry;
+    loop {
+        match updates.recv_timeout(wait) {
+            Ok(msg) => wanted.take(msg),
+            // Nothing is read between updates, so resending what's showing is
+            // how a restarted Discord gets noticed.
+            Err(RecvTimeoutError::Timeout) => wanted.stale |= wanted.playing.is_some(),
             Err(RecvTimeoutError::Disconnected) => break,
         }
-        if client.is_none() {
-            let mut fresh = DiscordIpcClient::new(id);
-            if fresh.connect().is_err() {
-                continue;
+        // Updates pile up while Discord is slow to answer. Only the newest counts.
+        updates.try_iter().for_each(|msg| wanted.take(msg));
+        wait = retry;
+        if !wanted.on {
+            if let Some(mut connected) = client.take() {
+                show(&mut connected, None);
+                let _ = connected.close();
             }
-            client = Some(fresh);
-            stale = true;
+            continue;
         }
-        if stale {
-            if let Some(connected) = client.as_mut() {
-                if show(connected, wanted.as_ref()) {
-                    stale = false;
-                } else {
-                    // Discord quit. The next try reconnects and shows this again.
-                    client = None;
-                    stale = true;
-                }
+        let Some(connected) = client.as_mut() else {
+            let mut fresh = DiscordIpcClient::new(id);
+            if fresh.connect().is_ok() {
+                client = Some(fresh);
+                proven = false;
+                wanted.stale = true;
+                // Connecting can take a while, so look for newer updates first.
+                wait = Duration::ZERO;
+            }
+            continue;
+        };
+        if !wanted.stale {
+            continue;
+        }
+        if show(connected, wanted.playing.as_ref()) {
+            wanted.stale = false;
+            proven = true;
+        } else {
+            // Discord quit, perhaps to restart. Try a fresh connection straight
+            // away if this one used to work, and after the usual wait if not.
+            client = None;
+            if proven {
+                wait = Duration::ZERO;
             }
         }
     }
@@ -134,9 +177,11 @@ fn run(id: &str, updates: mpsc::Receiver<Option<Playing>>) {
     }
 }
 
+/// One worker for the whole run, so turning presence off and on again can't
+/// leave threads behind waiting on a Discord that stopped answering.
 #[derive(Default)]
 pub struct Discord {
-    worker: Mutex<Option<Sender<Option<Playing>>>>,
+    worker: Mutex<Option<Sender<Msg>>>,
 }
 
 impl Discord {
@@ -146,17 +191,24 @@ impl Discord {
 
     pub fn update(&self, enabled: bool, playing: Option<Playing>) {
         let mut worker = self.worker.lock().expect("discord");
-        if !enabled || !Self::available() {
-            // Dropping the sender ends the thread, which clears the status first.
-            worker.take();
+        let msg = if enabled && Self::available() {
+            Msg::Show(playing)
+        } else if worker.is_some() {
+            Msg::Off
+        } else {
             return;
-        }
+        };
         let sender = worker.get_or_insert_with(|| {
             let (sender, updates) = mpsc::channel();
-            thread::spawn(move || run(APP_ID, updates));
+            thread::spawn(move || run(APP_ID, RETRY, updates));
             sender
         });
-        let _ = sender.send(playing);
+        let _ = sender.send(msg);
+    }
+
+    /// Clears the status and ends the worker, for when the app closes.
+    pub fn shutdown(&self) {
+        self.worker.lock().expect("discord").take();
     }
 }
 
@@ -198,13 +250,78 @@ mod tests {
     }
 
     #[cfg(unix)]
-    #[test]
-    fn talks_to_discord_and_clears_up_after_itself() {
+    mod fake {
+        use super::*;
         use std::{
-            io::{Read, Write},
-            os::unix::net::UnixListener,
+            io::{ErrorKind, Read, Write},
+            os::unix::net::{UnixListener, UnixStream},
+            path::PathBuf,
+            sync::MutexGuard,
+            time::Instant,
         };
-        fn read_frame(socket: &mut impl Read) -> serde_json::Value {
+
+        /// The pipe is found through an environment variable, which every test shares.
+        static ONE_AT_A_TIME: Mutex<()> = Mutex::new(());
+
+        /// A Discord that answers the way the real one does.
+        pub struct Discord {
+            dir: PathBuf,
+            listener: UnixListener,
+            _turn: MutexGuard<'static, ()>,
+        }
+
+        impl Discord {
+            pub fn start(name: &str) -> Self {
+                let turn = ONE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
+                let dir = std::env::temp_dir()
+                    .join(format!("sound95-discord-{name}-{}", std::process::id()));
+                let _ = std::fs::remove_dir_all(&dir);
+                std::fs::create_dir_all(&dir).unwrap();
+                let listener = UnixListener::bind(dir.join("discord-ipc-0")).unwrap();
+                listener.set_nonblocking(true).unwrap();
+                std::env::set_var("XDG_RUNTIME_DIR", &dir);
+                Self {
+                    dir,
+                    listener,
+                    _turn: turn,
+                }
+            }
+
+            /// The next connection, which must come within `within`.
+            pub fn accept(&self, within: Duration) -> UnixStream {
+                let deadline = Instant::now() + within;
+                loop {
+                    match self.listener.accept() {
+                        Ok((socket, _)) => {
+                            socket.set_nonblocking(false).unwrap();
+                            socket
+                                .set_read_timeout(Some(Duration::from_secs(5)))
+                                .unwrap();
+                            return socket;
+                        }
+                        Err(e) if e.kind() == ErrorKind::WouldBlock => {
+                            assert!(Instant::now() < deadline, "no connection came");
+                            thread::sleep(Duration::from_millis(10));
+                        }
+                        Err(e) => panic!("{e}"),
+                    }
+                }
+            }
+
+            /// Answers the handshake, as Discord does once it's ready.
+            pub fn welcome(socket: &mut UnixStream) {
+                assert_eq!(read_frame(socket)["client_id"], "123");
+                write_frame(socket, r#"{"cmd":"DISPATCH","evt":"READY"}"#);
+            }
+        }
+
+        impl Drop for Discord {
+            fn drop(&mut self) {
+                let _ = std::fs::remove_dir_all(&self.dir);
+            }
+        }
+
+        pub fn read_frame(socket: &mut impl Read) -> serde_json::Value {
             let mut head = [0; 8];
             socket.read_exact(&mut head).unwrap();
             let size = u32::from_le_bytes(head[4..8].try_into().unwrap()) as usize;
@@ -212,7 +329,8 @@ mod tests {
             socket.read_exact(&mut body).unwrap();
             serde_json::from_slice(&body).unwrap()
         }
-        fn write_frame(socket: &mut impl Write, body: &str) {
+
+        pub fn write_frame(socket: &mut impl Write, body: &str) {
             socket.write_all(&1u32.to_le_bytes()).unwrap();
             socket
                 .write_all(&(body.len() as u32).to_le_bytes())
@@ -220,36 +338,95 @@ mod tests {
             socket.write_all(body.as_bytes()).unwrap();
         }
 
-        let dir = std::env::temp_dir().join(format!("sound95-discord-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let listener = UnixListener::bind(dir.join("discord-ipc-0")).unwrap();
-        std::env::set_var("XDG_RUNTIME_DIR", &dir);
-        let (sender, updates) = mpsc::channel();
-        let worker = thread::spawn(move || run("123", updates));
-        sender.send(Some(playing())).unwrap();
+        /// Reads an update, answers it and returns its activity.
+        pub fn shown(socket: &mut UnixStream) -> serde_json::Value {
+            let update = read_frame(socket);
+            assert_eq!(update["cmd"], "SET_ACTIVITY");
+            write_frame(socket, "{}");
+            update["args"]["activity"].clone()
+        }
+    }
 
-        let (mut socket, _) = listener.accept().unwrap();
-        socket
-            .set_read_timeout(Some(Duration::from_secs(5)))
-            .unwrap();
-        assert_eq!(read_frame(&mut socket)["client_id"], "123");
-        write_frame(&mut socket, r#"{"cmd":"DISPATCH","evt":"READY"}"#);
-        let shown = read_frame(&mut socket);
-        assert_eq!(shown["cmd"], "SET_ACTIVITY");
-        assert_eq!(shown["args"]["activity"]["type"], 2);
-        assert_eq!(shown["args"]["activity"]["details"], "HELLO");
-        assert_eq!(shown["args"]["activity"]["state"], "xight");
-        assert_eq!(shown["args"]["activity"]["buttons"][1]["url"], SITE);
-        write_frame(&mut socket, "{}");
+    #[cfg(unix)]
+    #[test]
+    fn talks_to_discord_and_clears_up_after_itself() {
+        use fake::*;
+        let discord = Discord::start("talks");
+        let (sender, updates) = mpsc::channel();
+        let worker = thread::spawn(move || run("123", RETRY, updates));
+        sender.send(Msg::Show(Some(playing()))).unwrap();
+
+        let mut socket = discord.accept(Duration::from_secs(5));
+        Discord::welcome(&mut socket);
+        let status = shown(&mut socket);
+        assert_eq!(status["type"], 2);
+        assert_eq!(status["details"], "HELLO");
+        assert_eq!(status["state"], "xight");
+        assert_eq!(status["buttons"][1]["url"], SITE);
 
         drop(sender);
-        let cleared = read_frame(&mut socket);
-        assert_eq!(cleared["cmd"], "SET_ACTIVITY");
-        assert!(cleared["args"]
-            .get("activity")
-            .is_none_or(serde_json::Value::is_null));
-        write_frame(&mut socket, "{}");
+        assert!(shown(&mut socket).is_null());
         worker.join().unwrap();
-        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_restarted_discord_gets_the_status_back() {
+        use fake::*;
+        let retry = Duration::from_millis(100);
+        let discord = Discord::start("restart");
+        let (sender, updates) = mpsc::channel();
+        let worker = thread::spawn(move || run("123", retry, updates));
+        sender.send(Msg::Show(Some(playing()))).unwrap();
+        let mut socket = discord.accept(Duration::from_secs(5));
+        Discord::welcome(&mut socket);
+        assert_eq!(shown(&mut socket)["details"], "HELLO");
+
+        // Discord quits and comes back, and the page has nothing new to say.
+        drop(socket);
+        let mut socket = discord.accept(retry * 5);
+        Discord::welcome(&mut socket);
+        assert_eq!(shown(&mut socket)["details"], "HELLO");
+
+        drop(sender);
+        assert!(shown(&mut socket).is_null());
+        worker.join().unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_slow_discord_only_gets_the_newest_status() {
+        use fake::*;
+        let discord = Discord::start("slow");
+        let (sender, updates) = mpsc::channel();
+        let worker = thread::spawn(move || run("123", RETRY, updates));
+        sender.send(Msg::Show(Some(playing()))).unwrap();
+        let mut socket = discord.accept(Duration::from_secs(5));
+        // Discord takes its time to answer while the page moves on.
+        let mut later = playing();
+        later.title = "LATER".into();
+        sender.send(Msg::Off).unwrap();
+        sender.send(Msg::Show(Some(later))).unwrap();
+        Discord::welcome(&mut socket);
+        assert_eq!(shown(&mut socket)["details"], "LATER");
+
+        // Off clears the status and hangs up, and on again connects anew.
+        sender.send(Msg::Off).unwrap();
+        assert!(shown(&mut socket).is_null());
+        sender.send(Msg::Show(Some(playing()))).unwrap();
+        let mut socket = discord.accept(Duration::from_secs(5));
+        Discord::welcome(&mut socket);
+        assert_eq!(shown(&mut socket)["details"], "HELLO");
+
+        drop(sender);
+        assert!(shown(&mut socket).is_null());
+        worker.join().unwrap();
+    }
+
+    #[test]
+    fn nothing_starts_while_presence_is_off() {
+        let discord = Discord::default();
+        discord.update(false, None);
+        assert!(discord.worker.lock().unwrap().is_none());
     }
 }

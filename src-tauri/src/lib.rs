@@ -311,7 +311,7 @@ pub fn run() {
                 WindowEvent::Destroyed => {
                     login::close_all(window.app_handle());
                     window.state::<visual::Visual>().stop();
-                    window.state::<discord::Discord>().update(false, None);
+                    window.state::<discord::Discord>().shutdown();
                 }
                 _ => {}
             }
