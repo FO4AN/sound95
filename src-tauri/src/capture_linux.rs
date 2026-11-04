@@ -276,7 +276,10 @@ fn tap(serial: u64) -> Option<Tap> {
         .arg("--target")
         .arg(serial.to_string())
         .args(["--format", "f32", "--rate", "44100", "--channels", "1"])
-        .args(["--latency", "20ms"])
+        // In samples at --rate, about 23 ms. That still arrives faster than frames
+        // are drawn, and anything shorter makes the whole device run smaller,
+        // busier cycles.
+        .args(["--latency", "1024"])
         .args(raw_flag())
         .arg("-P")
         .arg("{ node.dont-fallback=true node.dont-reconnect=true node.dont-move=true node.name=sound95-visualizer media.name=Visualizer }")
