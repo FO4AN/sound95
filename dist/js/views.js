@@ -456,7 +456,16 @@ function followButton(urn) {
 
 async function userView(route) {
   const tab = route.tab || 'tracks';
-  const user = normalizeUser(await api.get(paths.user(route.urn)));
+  // Everything here needs only the URN, so the requests all go out at once.
+  const follow = followButton(route.urn);
+  const loadPlaylists = (t) => page(t, normalizePlaylist);
+  const [raw, result] = await Promise.all([
+    api.get(paths.user(route.urn)),
+    tab === 'playlists'
+      ? loadPlaylists(paths.userPlaylists(route.urn))
+      : pagedTrackView(tab === 'likes' ? paths.userLikes(route.urn) : paths.userTracks(route.urn)),
+  ]);
+  const user = normalizeUser(raw);
   const meta = [
     user.followers != null ? tr('{count} followers', { count: fmtCount(user.followers) }) : null,
     user.tracks != null ? tr('{count} tracks', { count: fmtCount(user.tracks) }) : null,
@@ -465,21 +474,18 @@ async function userView(route) {
   let tracks = [];
   let body;
   if (tab === 'playlists') {
-    const load = (t) => page(t, normalizePlaylist);
-    const result = await load(paths.userPlaylists(route.urn));
     body = result.items.length
-      ? el('div', { class: 'view' }, tileList(result, load, playlistTile))
+      ? el('div', { class: 'view' }, tileList(result, loadPlaylists, playlistTile))
       : empty(tr('No public playlists.'), 'playlist');
   } else {
-    const view = await pagedTrackView(tab === 'likes' ? paths.userLikes(route.urn) : paths.userTracks(route.urn));
-    tracks = view.tracks;
-    body = view.tracks.length ? view.node : empty(tr('No public tracks.'));
+    tracks = result.tracks;
+    body = result.tracks.length ? result.node : empty(tr('No public tracks.'));
   }
   return el('div', {},
     hero({ kind: tr('Artist'), title: user.name, meta, art: user.avatar, fallback: 'user' }),
     el('div', { class: 'hero-actions' },
       tab !== 'playlists' ? playButton(() => tracks) : null,
-      followButton(route.urn),
+      follow,
       user.link ? el('button', { onClick: () => api.open(user.link) }, tr('Open on SoundCloud')) : null),
     tabs([['tracks', tr('Tracks')], ['playlists', tr('Playlists')], ['likes', tr('Likes')]], tab,
       (id) => { if (id !== tab) go({ ...route, tab: id }); }),
@@ -526,9 +532,14 @@ function trackLyrics(track) {
 
 async function trackView(route, alive) {
   const tab = route.tab || 'details';
-  const track = trackDetails(await api.get(paths.track(route.urn)));
+  // Related tracks need only the URN, so they load alongside the track.
+  const [raw, related] = await Promise.all([
+    api.get(paths.track(route.urn)),
+    tab === 'related' ? pagedTrackView(paths.related(route.urn)) : null,
+  ]);
   // A page left before it loaded would only subscribe to events and fetch for nothing.
   if (!alive()) return el('div');
+  const track = trackDetails(raw);
   const blocked = track.access === 'blocked';
   const isCurrent = () => player.current?.urn === track.urn;
   const play = () => {
@@ -561,8 +572,7 @@ async function trackView(route, alive) {
   let body;
   if (tab === 'lyrics') body = trackLyrics(track);
   else if (tab === 'related') {
-    const view = await pagedTrackView(paths.related(track.urn));
-    body = view.tracks.length ? view.node : empty(tr('SoundCloud has no related tracks for this one.'));
+    body = related.tracks.length ? related.node : empty(tr('SoundCloud has no related tracks for this one.'));
   } else body = trackProperties(track);
 
   return el('div', {},
