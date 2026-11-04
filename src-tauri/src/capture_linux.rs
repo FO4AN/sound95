@@ -11,7 +11,7 @@ use std::{
     process::{Child, ChildStdout, Command, Stdio},
     sync::{
         atomic::{AtomicBool, AtomicU32, Ordering},
-        Arc, Mutex,
+        Arc, Mutex, OnceLock,
     },
     thread,
     time::{Duration, Instant},
@@ -253,12 +253,31 @@ impl Drop for Tap {
     }
 }
 
+/// Newer pw-record writes a .au file to stdout unless told --raw. Older ones
+/// write bare samples anyway, but refuse the flag and exit.
+fn raw_flag() -> Option<&'static str> {
+    static KNOWN: OnceLock<bool> = OnceLock::new();
+    let known = *KNOWN.get_or_init(|| {
+        Command::new("pw-record")
+            .arg("--help")
+            .stdin(Stdio::null())
+            .output()
+            .is_ok_and(|out| mentions_raw(&out.stdout) || mentions_raw(&out.stderr))
+    });
+    known.then_some("--raw")
+}
+
+fn mentions_raw(help: &[u8]) -> bool {
+    help.windows(5).any(|w| w == b"--raw")
+}
+
 fn tap(serial: u64) -> Option<Tap> {
     let mut child = Command::new("pw-record")
         .arg("--target")
         .arg(serial.to_string())
         .args(["--format", "f32", "--rate", "44100", "--channels", "1"])
-        .args(["--latency", "20ms", "--raw"])
+        .args(["--latency", "20ms"])
+        .args(raw_flag())
         .arg("-P")
         .arg("{ node.dont-fallback=true node.dont-reconnect=true node.dont-move=true node.name=sound95-visualizer media.name=Visualizer }")
         .arg("-")
@@ -506,6 +525,14 @@ mod tests {
         assert!(graph.0.contains_key(&3) && graph.0.contains_key(&9));
         graph.apply(json!({ "not": "a batch" }));
         assert_eq!(graph.0.len(), 2);
+    }
+
+    #[test]
+    fn raw_output_is_asked_for_only_where_pw_record_knows_it() {
+        let older = b"      --volume                          Stream volume 0-1.0 (default 1.000)\n  -q  --quality                         Resampler quality (0 - 15) (default 4)\n";
+        let newer = b"  -q  --quality                         Resampler quality (0 - 15) (default 4)\n  -a, --raw                             RAW mode\n";
+        assert!(!mentions_raw(older));
+        assert!(mentions_raw(newer));
     }
 
     #[test]
