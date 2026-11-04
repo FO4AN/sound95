@@ -232,7 +232,11 @@ function hero({ kind, title, meta, art, fallback }) {
 function playButton(getTracks) {
   return el('button', {
     class: 'default',
-    onClick: () => { const t = getTracks(); if (t.length) playList(t, 0); },
+    onClick: () => {
+      // The player drops blocked tracks, so a list of only those must not reach it.
+      const t = getTracks().filter((x) => x.access !== 'blocked');
+      if (t.length) playList(t, 0);
+    },
   }, icon('play'), tr('Play'));
 }
 
@@ -544,7 +548,8 @@ async function trackView(route) {
         },
       }, icon('mic'), tr('Karaoke')),
       track.link ? el('button', { onClick: () => api.open(track.link) }, tr('Open on SoundCloud')) : null),
-    track.waveform ? el('div', { class: 'wave-row' }, waveformView(track, { onPlay: play })) : null,
+    // A blocked track can't play, so clicking its waveform does nothing.
+    track.waveform ? el('div', { class: 'wave-row' }, waveformView(track, { onPlay: blocked ? () => {} : play })) : null,
     tabs([['details', tr('Details')], ['lyrics', tr('Lyrics')], ['related', tr('Related Tracks')]], tab,
       (id) => { if (id !== tab) go({ ...route, tab: id }); }),
     body);
