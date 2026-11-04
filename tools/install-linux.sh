@@ -7,6 +7,10 @@ BIN=$HOME/.local/bin/sound95
 ICON=$HOME/.local/share/icons/hicolor/512x512/apps/sound95.png
 ENTRY=$HOME/.local/share/applications/sound95.desktop
 
+# Only an x86-64 build is published, and anything else would install but never start.
+arch=$(uname -m)
+[ "$arch" = x86_64 ] || { echo "Sound95 only has a Linux build for x86-64. This machine is $arch." >&2; exit 1; }
+
 # The AppImage uses the system's glibc, so it needs at least the one it was built on.
 # Keep in step with .github/workflows/release.yml.
 v=$(getconf GNU_LIBC_VERSION 2>/dev/null | awk '{print $2}')
