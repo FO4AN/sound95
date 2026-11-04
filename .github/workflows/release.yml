@@ -44,6 +44,9 @@ jobs:
         include:
           # The AppImage brings its own GTK and WebKitGTK but uses the system's glibc, so
           # build on the oldest system we support. Keep in step with tools/install-linux.sh.
+          # GitHub is retiring this runner image: deprecated since 17 September 2026 and
+          # gone from 17 April 2027 (actions/runner-images#14254). Before then, move this
+          # build into an ubuntu:22.04 container. A newer runner fails tools/check-glibc.sh.
           - os: ubuntu-22.04
             bundles: appimage,deb
           - os: windows-latest
