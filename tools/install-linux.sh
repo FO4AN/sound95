@@ -7,6 +7,14 @@ BIN=$HOME/.local/bin/sound95
 ICON=$HOME/.local/share/icons/hicolor/512x512/apps/sound95.png
 ENTRY=$HOME/.local/share/applications/sound95.desktop
 
+# The AppImage uses the system's glibc, so it needs at least the one it was built on.
+# Keep in step with .github/workflows/release.yml.
+v=$(getconf GNU_LIBC_VERSION 2>/dev/null | awk '{print $2}')
+if [ -z "$v" ] || [ "$(printf '%s\n' 2.35 "$v" | sort -V | head -1)" != 2.35 ]; then
+  echo "Sound95 needs glibc 2.35 or newer (Ubuntu 22.04, Debian 12, Fedora 36 or later). This system has ${v:-no glibc}." >&2
+  exit 1
+fi
+
 url=$(curl -fsSL "$RELEASES/latest.json" | grep -o 'https://[^"]*\.AppImage' | head -1)
 [ -n "$url" ] || { echo "No Linux build found in the latest release." >&2; exit 1; }
 

@@ -42,7 +42,9 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: ubuntu-24.04
+          # The AppImage brings its own GTK and WebKitGTK but uses the system's glibc, so
+          # build on the oldest system we support. Keep in step with tools/install-linux.sh.
+          - os: ubuntu-22.04
             bundles: appimage,deb
           - os: windows-latest
             bundles: nsis
@@ -70,6 +72,10 @@ jobs:
           releaseId: ${{ needs.create.outputs.id }}
           releaseBody: ${{ needs.create.outputs.notes }}
           updaterJsonPreferNsis: true
+      # Stops a runner upgrade quietly raising the glibc the AppImage needs.
+      - name: Check the AppImage runs on glibc 2.35
+        if: runner.os == 'Linux'
+        run: tools/check-glibc.sh 2.35 src-tauri/target/release/bundle/appimage/*.AppImage
 
   publish:
     needs: build

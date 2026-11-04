@@ -15,7 +15,9 @@ Get the latest build from [Releases](https://github.com/FO4AN/sound95/releases/l
 for your user only, so it doesn't need administrator rights. The installer isn't code
 signed yet, so SmartScreen may warn you: choose **More info**, then **Run anyway**.
 
-**Linux (x86-64):** this installs the app and a menu entry, with no root needed.
+**Linux (x86-64):** this installs the app and a menu entry, with no root needed. It needs
+glibc 2.35 or newer: Ubuntu 22.04, Debian 12, Fedora 36 or later. Older systems, such as
+RHEL 9, aren't supported.
 
 ```bash
 curl -fsSL https://github.com/FO4AN/sound95/releases/latest/download/install-linux.sh | bash
@@ -92,6 +94,10 @@ git tag -a v0.5.0 -m "What changed" && git push origin v0.5.0
 The Release workflow builds both installers on GitHub, signs them with the
 `TAURI_SIGNING_PRIVATE_KEY` secret and publishes them together. Keep a copy of that key:
 without it, installed copies can't update to a new build.
+
+The Linux build runs on Ubuntu 22.04, because the AppImage uses the system's glibc and so
+needs at least the one it was built on. `tools/check-glibc.sh` fails the release if that
+creeps up, and `tools/install-linux.sh` checks for it too.
 
 ## How it works
 
