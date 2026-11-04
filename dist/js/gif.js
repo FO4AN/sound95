@@ -13,7 +13,8 @@ export function parseGif(buffer) {
   let p = 13;
   const table = (packed) => {
     const size = 3 * (2 << (packed & 7));
-    const colours = b.subarray(p, p + size);
+    // A copy, not a view: a view would keep the whole file in memory while it plays.
+    const colours = b.slice(p, p + size);
     p += size;
     return colours;
   };
