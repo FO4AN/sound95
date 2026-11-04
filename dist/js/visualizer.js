@@ -521,10 +521,10 @@ function frame(now) {
   drawnAt = now;
   const going = step(now);
   for (const surface of surfaces) {
-    const { canvas, mode, memory, pixel } = surface;
-    if (!canvas.isConnected || !canvas.clientWidth) continue;
-    const w = Math.max(1, Math.round(canvas.clientWidth / pixel));
-    const h = Math.max(1, Math.round(canvas.clientHeight / pixel));
+    const { canvas, mode, memory, pixel, width, height } = surface;
+    if (!canvas.isConnected || !width) continue;
+    const w = Math.max(1, Math.round(width / pixel));
+    const h = Math.max(1, Math.round(height / pixel));
     if (canvas.width !== w) canvas.width = w;
     if (canvas.height !== h) canvas.height = h;
     MODES[mode].draw(canvas.getContext('2d'), w, h, memory);
@@ -543,10 +543,18 @@ function wake() {
 
 /** Starts drawing onto a canvas. Returns its handle, with `mode` and `detach()`. */
 export function attachVisual(canvas, { mode = 'bars', pixel = 1 } = {}) {
+  // The picture fills the content box, since padding isn't drawn on, and a new size
+  // is redrawn at once even when nothing is playing.
+  const resized = new ResizeObserver(([entry]) => {
+    surface.width = entry.contentRect.width;
+    surface.height = entry.contentRect.height;
+    wake();
+  });
   const surface = {
-    canvas, mode, pixel, memory: {},
-    detach() { surfaces.delete(surface); syncCapture(); },
+    canvas, mode, pixel, memory: {}, width: 0, height: 0,
+    detach() { resized.disconnect(); surfaces.delete(surface); syncCapture(); },
   };
+  resized.observe(canvas);
   surfaces.add(surface);
   syncCapture();
   return surface;
@@ -584,6 +592,7 @@ export function toggleVisualizer() {
       surface.mode = id;
       surface.memory = {};
       try { localStorage.setItem(MODE_KEY, id); } catch { /* optional */ }
+      wake(); // nothing else redraws it while paused
       describe();
     },
   }));
