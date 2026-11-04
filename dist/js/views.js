@@ -220,6 +220,36 @@ const userTile = (u) => tile({
   onOpen: () => go({ name: 'user', urn: u.urn }),
 });
 
+/** Tiles with paging, like trackList. Returns the grid and its More... button. */
+function tileList(first, load, toTile) {
+  const grid = el('div', { class: 'tiles' }, first.items.map(toTile));
+  // Outside the grid, so the button doesn't take a tile's place.
+  const more = el('div', { class: 'more' });
+  let nextHref = first.next;
+  const addMoreButton = () => {
+    if (!nextHref) {
+      more.remove();
+      return;
+    }
+    clear(more, el('button', {
+      onClick: async (e) => {
+        e.target.disabled = true;
+        try {
+          const nextPage = await load(nextHref);
+          nextHref = nextPage.next;
+          grid.append(...nextPage.items.map(toTile));
+          addMoreButton();
+        } catch (err) {
+          e.target.disabled = false;
+          setStatus(errorText(err));
+        }
+      },
+    }, tr('More...')));
+  };
+  addMoreButton();
+  return [grid, first.next ? more : null];
+}
+
 function hero({ kind, title, meta, art, fallback }) {
   return el('div', { class: 'hero' },
     art ? el('img', { class: 'hero-art', src: bigArt(art), alt: '' }) : el('span', { class: 'hero-art' }, icon(fallback)),
@@ -331,12 +361,10 @@ async function searchView(route) {
     body = view.tracks.length ? view.node : empty(tr('No tracks found for "{query}".', { query: route.q }), 'search');
   } else {
     const isPeople = tab === 'people';
-    const result = await page(
-      isPeople ? paths.searchUsers(route.q) : paths.searchPlaylists(route.q),
-      isPeople ? normalizeUser : normalizePlaylist,
-    );
+    const load = (t) => page(t, isPeople ? normalizeUser : normalizePlaylist);
+    const result = await load(isPeople ? paths.searchUsers(route.q) : paths.searchPlaylists(route.q));
     body = result.items.length
-      ? el('div', { class: 'view' }, el('div', { class: 'tiles' }, result.items.map(isPeople ? userTile : playlistTile)))
+      ? el('div', { class: 'view' }, tileList(result, load, isPeople ? userTile : playlistTile))
       : empty(tr(isPeople ? 'No people found for "{query}".' : 'No playlists found for "{query}".', { query: route.q }), 'search');
   }
   root.append(body);
@@ -365,11 +393,12 @@ async function recentView() {
 
 async function followingView() {
   if (!session.user) return empty(tr('Log in to see who you follow.'), 'users');
-  const result = await page(paths.followings(), normalizeUser);
+  const load = (t) => page(t, normalizeUser);
+  const result = await load(paths.followings());
   if (!result.items.length) return empty(tr('You are not following anyone yet.'), 'users');
   return el('div', { class: 'view' },
     el('h1', { class: 'greeting' }, tr('Following')),
-    el('div', { class: 'tiles' }, result.items.map(userTile)));
+    tileList(result, load, userTile));
 }
 
 async function playlistView(route) {
@@ -436,9 +465,10 @@ async function userView(route) {
   let tracks = [];
   let body;
   if (tab === 'playlists') {
-    const result = await page(paths.userPlaylists(route.urn), normalizePlaylist);
+    const load = (t) => page(t, normalizePlaylist);
+    const result = await load(paths.userPlaylists(route.urn));
     body = result.items.length
-      ? el('div', { class: 'view' }, el('div', { class: 'tiles' }, result.items.map(playlistTile)))
+      ? el('div', { class: 'view' }, tileList(result, load, playlistTile))
       : empty(tr('No public playlists.'), 'playlist');
   } else {
     const view = await pagedTrackView(tab === 'likes' ? paths.userLikes(route.urn) : paths.userTracks(route.urn));

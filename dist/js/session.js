@@ -11,13 +11,44 @@ export const session = {
 };
 
 const WATCH_EVERY_MS = 3000;
+const MAX_PLAYLIST_PAGES = 20;
 
 const listeners = new Set();
 let watching = 0; // only the newest like window is watched
+let loads = 0; // a newer load of the session stops an older one's paging
 export function onSessionChange(fn) { listeners.add(fn); return () => listeners.delete(fn); }
 export function emitChange() { listeners.forEach((fn) => fn()); }
 
+/**
+ * The sidebar and Add to Playlist need every playlist, not just the first page.
+ * The rest load after startup so it isn't held up.
+ */
+async function loadMorePlaylists(next, mine) {
+  const more = [];
+  for (let i = 0; next && i < MAX_PLAYLIST_PAGES; i++) {
+    try {
+      const result = await page(next, normalizePlaylist);
+      more.push(...result.items);
+      next = result.next;
+    } catch {
+      break; // the playlists that did load are still worth having
+    }
+    if (mine !== loads) return;
+  }
+  if (mine !== loads || !more.length) return;
+  // Offset paging repeats a playlist when the list changes while it loads.
+  const seen = new Set(session.playlists.map((p) => p.urn));
+  for (const p of more) {
+    if (!seen.has(p.urn)) {
+      seen.add(p.urn);
+      session.playlists.push(p);
+    }
+  }
+  emitChange();
+}
+
 export async function loadSession() {
+  const mine = ++loads;
   const status = await api.status();
   session.user = null;
   session.liked = new Set();
@@ -32,7 +63,10 @@ export async function loadSession() {
         page(paths.myPlaylists(), normalizePlaylist),
       ]);
       if (likes.status === 'fulfilled') session.liked = new Set(likes.value.collection.map(trackUrn));
-      if (playlists.status === 'fulfilled') session.playlists = playlists.value.items;
+      if (playlists.status === 'fulfilled') {
+        session.playlists = playlists.value.items;
+        loadMorePlaylists(playlists.value.next, mine);
+      }
     }
   } finally {
     emitChange();
