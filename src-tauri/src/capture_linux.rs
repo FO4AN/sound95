@@ -14,12 +14,17 @@ use std::{
         Arc, Mutex,
     },
     thread,
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 /// How long to wait before starting pw-dump again, as when PipeWire restarts.
 const RESTART: Duration = Duration::from_millis(1000);
 const MAX_TAPS: usize = 4;
+/// A tap that stopped isn't started again for this long, so one that can't work
+/// doesn't launch pw-record every frame.
+const RETRY: Duration = Duration::from_millis(1000);
+/// A tap that has sent nothing for this long isn't hearing anything.
+const QUIET: Duration = Duration::from_millis(250);
 const GRAPH_RATE: f64 = 48_000.0;
 const GRAPH_QUANTUM: f64 = 1024.0;
 const MAX_OUTPUT_MS: f64 = 1000.0;
@@ -221,10 +226,24 @@ impl Watch {
     }
 }
 
+struct Ring {
+    samples: VecDeque<f32>,
+    /// When pw-record last sent anything.
+    fed: Option<Instant>,
+}
+
+impl Ring {
+    /// A running pw-record proves nothing, as it may never get linked. Even a
+    /// silent stream sends zeros, so a tap that sends nothing hears nothing.
+    fn hearing(&self, now: Instant) -> bool {
+        self.fed.is_some_and(|at| now.duration_since(at) < QUIET)
+    }
+}
+
 struct Tap {
     serial: u64,
     child: Child,
-    ring: Arc<Mutex<VecDeque<f32>>>,
+    ring: Arc<Mutex<Ring>>,
 }
 
 impl Drop for Tap {
@@ -249,7 +268,10 @@ fn tap(serial: u64) -> Option<Tap> {
         .spawn()
         .ok()?;
     let mut stdout = child.stdout.take()?;
-    let ring = Arc::new(Mutex::new(VecDeque::with_capacity(FFT)));
+    let ring = Arc::new(Mutex::new(Ring {
+        samples: VecDeque::with_capacity(FFT),
+        fed: None,
+    }));
     let writer = ring.clone();
     thread::spawn(move || {
         let mut buffer = [0u8; 4096];
@@ -260,14 +282,15 @@ fn tap(serial: u64) -> Option<Tap> {
             }
             filled += read;
             let whole = filled - filled % 4;
-            let mut samples = writer.lock().expect("ring");
+            let mut ring = writer.lock().expect("ring");
             for chunk in buffer[..whole].as_chunks::<4>().0 {
-                if samples.len() == FFT {
-                    samples.pop_front();
+                if ring.samples.len() == FFT {
+                    ring.samples.pop_front();
                 }
-                samples.push_back(f32::from_le_bytes(*chunk));
+                ring.samples.push_back(f32::from_le_bytes(*chunk));
             }
-            drop(samples);
+            ring.fed = Some(Instant::now());
+            drop(ring);
             buffer.copy_within(whole..filled, 0);
             filled -= whole;
         }
@@ -290,9 +313,18 @@ pub fn available() -> bool {
     })
 }
 
+/// Whether a stream's tap stopped too lately to start another.
+fn resting(stopped: &HashMap<u64, Instant>, serial: u64, now: Instant) -> bool {
+    stopped
+        .get(&serial)
+        .is_some_and(|at| now.duration_since(*at) < RETRY)
+}
+
 pub struct Capture {
     watch: Arc<Watch>,
     taps: Vec<Tap>,
+    /// When each wanted stream's tap last stopped or failed to start.
+    stopped: HashMap<u64, Instant>,
 }
 
 impl Drop for Capture {
@@ -314,37 +346,55 @@ impl Capture {
         Self {
             watch,
             taps: Vec::new(),
+            stopped: HashMap::new(),
         }
     }
 
     pub(super) fn heard(&mut self) -> Heard {
         let wanted = self.watch.wanted.lock().expect("wanted").clone();
-        self.taps
-            .retain_mut(|t| wanted.contains(&t.serial) && matches!(t.child.try_wait(), Ok(None)));
+        let now = Instant::now();
+        let stopped = &mut self.stopped;
+        self.taps.retain_mut(|t| {
+            let running = matches!(t.child.try_wait(), Ok(None));
+            if !running {
+                stopped.insert(t.serial, now);
+            }
+            running && wanted.contains(&t.serial)
+        });
+        stopped.retain(|serial, _| wanted.contains(serial));
         for serial in wanted {
-            if self.taps.len() < MAX_TAPS && !self.taps.iter().any(|t| t.serial == serial) {
-                self.taps.extend(tap(serial));
+            if self.taps.len() < MAX_TAPS
+                && !self.taps.iter().any(|t| t.serial == serial)
+                && !resting(&self.stopped, serial, now)
+            {
+                match tap(serial) {
+                    Some(tap) => self.taps.push(tap),
+                    None => {
+                        self.stopped.insert(serial, now);
+                    }
+                }
             }
         }
         // WebKit keeps silent streams open beside the real one.
-        let samples = self
+        let heard: Vec<Vec<f32>> = self
             .taps
             .iter()
-            .map(|t| {
-                t.ring
-                    .lock()
-                    .expect("ring")
-                    .iter()
-                    .copied()
-                    .collect::<Vec<f32>>()
+            .filter_map(|t| {
+                let ring = t.ring.lock().expect("ring");
+                ring.hearing(now)
+                    .then(|| ring.samples.iter().copied().collect())
             })
+            .collect();
+        let live = !heard.is_empty();
+        let samples = heard
+            .into_iter()
             .max_by(|a, b| {
                 let energy = |s: &[f32]| s.iter().map(|x| x * x).sum::<f32>();
                 energy(a).total_cmp(&energy(b))
             })
             .unwrap_or_default();
         Heard {
-            live: !self.taps.is_empty(),
+            live,
             samples,
             output_ms: OUTPUT_MS.load(Ordering::Relaxed),
         }
@@ -456,6 +506,27 @@ mod tests {
         assert!(graph.0.contains_key(&3) && graph.0.contains_key(&9));
         graph.apply(json!({ "not": "a batch" }));
         assert_eq!(graph.0.len(), 2);
+    }
+
+    #[test]
+    fn a_stopped_tap_waits_before_it_starts_again() {
+        let now = Instant::now();
+        let stopped = HashMap::from([(7, now)]);
+        assert!(resting(&stopped, 7, now + RETRY / 2));
+        assert!(!resting(&stopped, 7, now + RETRY));
+        assert!(!resting(&stopped, 8, now));
+    }
+
+    #[test]
+    fn only_a_tap_that_sends_audio_is_live() {
+        let now = Instant::now();
+        let ring = |fed| Ring {
+            samples: VecDeque::new(),
+            fed,
+        };
+        assert!(!ring(None).hearing(now));
+        assert!(ring(Some(now)).hearing(now + QUIET / 2));
+        assert!(!ring(Some(now)).hearing(now + QUIET));
     }
 
     #[test]
