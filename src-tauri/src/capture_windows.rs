@@ -74,7 +74,22 @@ fn listen(
             ring.lock().expect("ring").clear();
             continue;
         }
-        packets.read_from_device_to_deque(&mut bytes)?;
+        // One wake-up can stand for several packets. Reading just one would leave
+        // the rest queued, and the bars would fall further behind the music.
+        let mut read_any = false;
+        while packets.get_next_packet_size()?.unwrap_or(0) > 0 {
+            let before = bytes.len();
+            let info = packets.read_from_device_to_deque(&mut bytes)?;
+            if info.flags.silent {
+                // Windows says a silent packet's contents are to be ignored.
+                bytes.range_mut(before..).for_each(|b| *b = 0);
+            }
+            read_any = true;
+        }
+        if !read_any {
+            // An earlier pass already took the packet this wake-up was for.
+            continue;
+        }
         let whole = bytes.len() - bytes.len() % FRAME_BYTES;
         let frames: Vec<u8> = bytes.drain(..whole).collect();
         let mut loudest: f32 = 0.0;
