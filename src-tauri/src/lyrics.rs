@@ -46,6 +46,7 @@ const NOISE: &[&str] = &[
     "sped",
     "speed",
     "nightcore",
+    "daycore",
     "reverb",
     "tgk",
     "площадк",
@@ -61,7 +62,9 @@ const NOT_THE_SONG: &[&str] = &[
     "romanized",
     "acapella",
 ];
-const SPEED_CHANGED: &[&str] = &["slowed", "sped up", "speed up", "spedup", "nightcore"];
+/// Tags of an upload played faster or slower, as whole words and run together.
+const SPEED_CHANGED: &[&str] = &[" slowed", " sped up", " speed up", " nightcore", " daycore"];
+const SPEED_CHANGED_SQUASHED: &[&str] = &["spedup", "speedup", "nightcore", "daycore"];
 const CREDITS: &[&str] = &[
     "作词", "作曲", "编曲", "制作", "混音", "母带", "词:", "曲:", "词：", "曲：",
 ];
@@ -78,6 +81,9 @@ pub struct Request {
     /// Also fetch text-only results when timed ones exist, for the picker.
     #[serde(default)]
     everything: bool,
+    /// The track's own title. A typed search often leaves out "(sped up)".
+    #[serde(default)]
+    speed_title: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -270,8 +276,23 @@ fn guesses(title: &str, artist: &str) -> Vec<(String, String)> {
     pairs
 }
 
+/// "(sped up)", "Sped-Up", "speedup", "slowed + reverb", "nightcore", "daycore".
+fn speed_changed(title: &str) -> bool {
+    let words: String = plain_letters(title)
+        .to_lowercase()
+        .chars()
+        .map(|c| if c.is_alphanumeric() { c } else { ' ' })
+        .collect();
+    let words: Vec<&str> = words.split_whitespace().collect();
+    let spaced = format!(" {} ", words.join(" "));
+    let squashed = words.concat();
+    SPEED_CHANGED.iter().any(|tag| spaced.contains(tag))
+        || SPEED_CHANGED_SQUASHED
+            .iter()
+            .any(|tag| squashed.contains(tag))
+}
+
 fn query(req: &Request) -> Query {
-    let lower = req.title.to_lowercase();
     Query {
         pairs: if req.exact {
             vec![(req.artist.trim().into(), req.title.trim().into())]
@@ -279,7 +300,8 @@ fn query(req: &Request) -> Query {
             guesses(&req.title, &req.artist)
         },
         seconds: req.duration_ms as f64 / 1000.0,
-        speed_changed: SPEED_CHANGED.iter().any(|s| lower.contains(s)),
+        speed_changed: speed_changed(&req.title)
+            || req.speed_title.as_deref().is_some_and(speed_changed),
     }
 }
 
@@ -1254,6 +1276,39 @@ mod tests {
         assert!(result.speed_adjusted);
         assert_eq!(result.off_by, 0);
         assert_eq!(result.lines[1].ms, 16_000);
+    }
+
+    #[test]
+    fn spots_speed_tags_however_they_are_spelled() {
+        for title in [
+            "Song (sped up)",
+            "Song (sped-up)",
+            "Song (Speed-Up)",
+            "Song (speedup)",
+            "song speedup",
+            "Song (daycore)",
+            "Song [Slowed + Reverb]",
+            "Song - nightcore",
+        ] {
+            assert!(speed_changed(title), "{title}");
+        }
+        for title in ["Speedometer", "Song (Live)", "Slow Dancing"] {
+            assert!(!speed_changed(title), "{title}");
+        }
+        assert_eq!(
+            guesses("Artist - Song (daycore)", "x")[0],
+            pair("Artist", "Song")
+        );
+        // A typed search keeps the scaling the track's own title asks for.
+        let typed = Request {
+            title: "Song".into(),
+            artist: "Artist".into(),
+            duration_ms: 144_000,
+            exact: true,
+            everything: true,
+            speed_title: Some("Artist - Song (sped up)".into()),
+        };
+        assert!(query(&typed).speed_changed);
     }
 
     #[test]

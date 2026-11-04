@@ -29,6 +29,8 @@ const requestFor = (track) => ({
   title: track.title,
   artist: track.artist,
   durationMs: track.fullDuration || track.duration || 0,
+  // Find Lyrics replaces the title with what you type, which seldom says "(sped up)".
+  speedTitle: track.title,
 });
 
 /** Results for a track, best first. Kept for the session, except failures. */
