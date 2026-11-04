@@ -92,7 +92,8 @@ git tag -a v0.5.0 -m "What changed" && git push origin v0.5.0
 ```
 
 The Release workflow builds both installers on GitHub, signs them with the
-`TAURI_SIGNING_PRIVATE_KEY` secret and publishes them together. Keep a copy of that key:
+`TAURI_SIGNING_PRIVATE_KEY` secret and publishes them together once the tests pass. If the
+tests fail, the release stays a draft that the updater can't see. Keep a copy of that key:
 without it, installed copies can't update to a new build.
 
 The Linux build runs on Ubuntu 22.04, because the AppImage uses the system's glibc and so

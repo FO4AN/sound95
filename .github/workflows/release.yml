@@ -77,8 +77,14 @@ jobs:
         if: runner.os == 'Linux'
         run: tools/check-glibc.sh 2.35 src-tauri/target/release/bundle/appimage/*.AppImage
 
+  # The tests run alongside the build. If they fail, the release stays a draft.
+  ci:
+    permissions:
+      contents: read
+    uses: ./.github/workflows/ci.yml
+
   publish:
-    needs: build
+    needs: [build, ci]
     runs-on: ubuntu-24.04
     steps:
       - run: gh release edit "$TAG" --draft=false --latest

@@ -4,6 +4,8 @@ on:
   push:
     branches: [main]
   pull_request:
+  # The Release workflow runs these before it publishes.
+  workflow_call:
 
 jobs:
   test:
