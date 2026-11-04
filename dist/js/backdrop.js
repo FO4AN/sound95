@@ -89,20 +89,26 @@ async function gifCanvas(file) {
   canvas.width = gif.width;
   canvas.height = gif.height;
   const ctx = canvas.getContext('2d');
-  const picture = new ImageData(gif.width, gif.height);
-  const draw = () => { picture.data.set(gif.step()); ctx.putImageData(picture, 0, 0); };
-  draw();
+  // Wraps the decoder's own pixels without a copy, so it always holds the latest frame.
+  const picture = new ImageData(gif.step(), gif.width, gif.height);
+  ctx.putImageData(picture, 0, 0);
   let owed = 0;
   return {
     canvas,
     advance(ms) {
+      // A still GIF never changes, so there is nothing to redraw.
+      if (gif.count === 1) return;
       owed += ms;
       // A long pause shouldn't race through the frames it missed.
       owed = Math.min(owed, gif.delay * 4);
+      let moved = false;
       while (owed >= gif.delay) {
         owed -= gif.delay;
-        draw();
+        gif.step();
+        moved = true;
       }
+      // Only the last frame stepped through is ever seen, so only it is uploaded.
+      if (moved) ctx.putImageData(picture, 0, 0);
     },
   };
 }

@@ -166,7 +166,9 @@ export function gifFrames(gif) {
   // Decoded frames are kept unless the GIF is huge, then decoded again as needed.
   const keep = width * height * frames.length <= 48_000_000;
   let index = -1;
+  // One reused copy for "restore previous", which only holds a picture while hasSaved.
   let saved = null;
+  let hasSaved = false;
 
   const indices = (i) => {
     if (decoded.has(i)) return decoded.get(i);
@@ -186,16 +188,16 @@ export function gifFrames(gif) {
     if (index === frames.length - 1 || index < 0) {
       // Starting over: the first frame draws onto nothing.
       pixels.fill(0);
-      saved = null;
       index = 0;
     } else {
       if (last.disposal === 2) clearRect(last);
-      else if (last.disposal === 3 && saved) pixels.set(saved);
+      else if (last.disposal === 3 && hasSaved) pixels.set(saved);
       index += 1;
     }
     const f = frames[index];
     // "Restore previous" on the first frame keeps it, as most players do.
-    saved = f.disposal === 3 && index > 0 ? pixels.slice() : null;
+    hasSaved = f.disposal === 3 && index > 0;
+    if (hasSaved) (saved ??= new Uint8ClampedArray(pixels.length)).set(pixels);
     const source = indices(index);
     const { colours, transparent } = f;
     for (let y = 0; y < f.height; y++) {
