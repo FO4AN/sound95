@@ -50,7 +50,9 @@ export function lyricsFor(track) {
 /** What karaoke shows for a track: lyrics you chose, pasted or tapped, or else the best found. */
 export function chosenLyricsFor(track) {
   const mine = saved(track.urn).custom;
-  return mine ? Promise.resolve(mine) : lyricsFor(track).then(([best]) => best || null);
+  // Pasted and tapped lyrics don't name a song; they're this track's.
+  if (mine) return Promise.resolve({ artist: track.artist, title: track.title, ...mine });
+  return lyricsFor(track).then(([best]) => best || null);
 }
 
 function savedAll() {
@@ -135,11 +137,16 @@ function toCues(lyrics, total) {
     const gap = Math.max(300, next - line.ms);
     // A blank line marks where the singing stops. Otherwise singers finish before the
     // next line starts, so don't drag the wipe out to it.
-    const guess = after && !after.text ? gap : Math.min(gap * 0.92, singMs(line.text));
+    const marked = after && !after.text;
+    const guess = marked ? gap : Math.min(gap * 0.92, singMs(line.text));
     let end = line.ms + (line.dur || guess);
     const words = timeWords(line.words?.length ? line.words : spreadWords(line.text, line.ms, end), end);
     end = Math.max(end, words[words.length - 1]?.end ?? end);
-    cues.push({ ms: line.ms, end, text: line.text, words });
+    // The break screen takes the line away, so when its end is only a guess it allows
+    // for a slow line or a held note: twice the guess.
+    const guessed = !line.dur && !line.words?.length && !marked;
+    const rest = guessed ? line.ms + Math.min(gap, 2 * (end - line.ms)) : end;
+    cues.push({ ms: line.ms, end, rest, text: line.text, words });
   });
   return cues;
 }
@@ -342,8 +349,8 @@ function renderCues(t) {
   const index = lastCueBefore(cues, t);
   const cue = cues[index];
   const upcoming = cues[index + 1];
-  const quietUntilNext = upcoming && upcoming.ms - (cue?.end ?? 0) > REST_MS;
-  const resting = index < 0 || (t > cue.end + LINE_TAIL_MS && quietUntilNext);
+  const quietUntilNext = upcoming && upcoming.ms - (cue?.rest ?? 0) > REST_MS;
+  const resting = index < 0 || (t > cue.rest + LINE_TAIL_MS && quietUntilNext);
   const left = upcoming ? upcoming.ms - t : 0;
   const count = resting && left <= COUNT_IN_MS ? Math.ceil(left / 1000) : 0;
   const key = (index + 1) * 16 + (resting ? 8 : 0) + count;
