@@ -627,6 +627,17 @@ export async function createPlaylist() {
   }
 }
 
+// PUT replaces a playlist's whole track list, so two adds to one playlist must not
+// overlap: the second would resend the list from before the first.
+const playlistWrites = new Map();
+function queueWrite(urn, fn) {
+  const done = (playlistWrites.get(urn) || Promise.resolve()).then(fn);
+  const tail = done.catch(() => {});
+  playlistWrites.set(urn, tail);
+  tail.then(() => { if (playlistWrites.get(urn) === tail) playlistWrites.delete(urn); });
+  return done;
+}
+
 async function addToPlaylist(track) {
   const owned = session.playlists;
   const choice = await dialog(tr('Add to Playlist'), (close) => ({
@@ -642,17 +653,19 @@ async function addToPlaylist(track) {
   }));
   const target = choice === 'new' ? await createPlaylist() : choice;
   if (!target) return;
-  try {
-    setStatus(tr('Adding to "{title}"...', { title: target.title }), { sticky: true });
-    // PUT replaces the whole track list, so the existing tracks must be resent.
-    const ids = (await api.get(paths.playlist(target.urn))).tracks.map((t) => t.id);
-    const id = Number(idOf(track.urn));
-    if (ids.includes(id)) return setStatus(tr('"{title}" is already in "{playlist}"', { title: track.title, playlist: target.title }));
-    await api.send('PUT', paths.playlist(target.urn), { playlist: { tracks: [...ids, id] } });
-    setStatus(tr('Added "{title}" to "{playlist}"', { title: track.title, playlist: target.title }));
-  } catch (e) {
-    setStatus(errorText(e));
-  }
-  return undefined;
+  setStatus(tr('Adding to "{title}"...', { title: target.title }), { sticky: true });
+  await queueWrite(target.urn, async () => {
+    try {
+      // PUT replaces the whole track list, so the existing tracks must be resent.
+      const ids = (await api.get(paths.playlist(target.urn))).tracks.map((t) => t.id);
+      const id = Number(idOf(track.urn));
+      if (ids.includes(id)) return setStatus(tr('"{title}" is already in "{playlist}"', { title: track.title, playlist: target.title }));
+      await api.send('PUT', paths.playlist(target.urn), { playlist: { tracks: [...ids, id] } });
+      setStatus(tr('Added "{title}" to "{playlist}"', { title: track.title, playlist: target.title }));
+    } catch (e) {
+      setStatus(errorText(e));
+    }
+    return undefined;
+  });
 }
 
