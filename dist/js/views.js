@@ -12,7 +12,7 @@ import { dialog, prompt, showMenu } from './dialogs.js';
 import { emitChange, isLiked, onSessionChange, session, toggleLike } from './session.js';
 import { enqueue, onPlayerChange, playList, player, togglePlay } from './player.js';
 import { waveformView } from './waveform.js';
-import { lyricsFor, showKaraoke } from './karaoke.js';
+import { chosenLyricsFor, showKaraoke } from './karaoke.js';
 
 const DOUBLE_CLICK_MS = 220;
 
@@ -602,14 +602,15 @@ function trackProperties(track) {
 
 function trackLyrics(track) {
   const body = el('div', { class: 'view' }, el('div', { class: 'note' }, tr('Searching for lyrics...')));
-  lyricsFor(track).then(([best]) => {
+  // The lyrics karaoke shows: ones you chose, pasted or tapped come first.
+  chosenLyricsFor(track).then((best) => {
     if (!best) {
       clear(body, empty(tr('No lyrics found for this track.')));
       return;
     }
     clear(body,
       el('div', { class: 'description sunken selectable-text' }, best.lines.map((l) => el('div', { class: 'lyric-line' }, l.text))),
-      el('div', { class: 'note' }, tr('Lyrics from {source}: {track}', { source: best.source, track: `${best.artist} - ${best.title}` })));
+      el('div', { class: 'note' }, tr('Lyrics from {source}: {track}', { source: tr(best.source), track: `${best.artist} - ${best.title}` })));
   }, (e) => clear(body, el('div', { class: 'note' }, errorText(e))));
   return body;
 }
