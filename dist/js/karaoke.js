@@ -451,8 +451,10 @@ function onKey(e) {
     if (e.key === 'Escape') { e.stopPropagation(); stopTapping(); }
     return;
   }
-  if (e.key === '[') nudge(-NUDGE_MS);
-  if (e.key === ']') nudge(NUDGE_MS);
+  // On a Cyrillic layout these keys type letters, so where they sit counts too.
+  const cyrillic = /\p{Script=Cyrillic}/u.test(e.key);
+  if (e.key === '[' || (cyrillic && e.code === 'BracketLeft')) nudge(-NUDGE_MS);
+  if (e.key === ']' || (cyrillic && e.code === 'BracketRight')) nudge(NUDGE_MS);
 }
 
 /* ---------- Dialogs ---------- */
@@ -527,7 +529,7 @@ async function pasteDialog() {
     return {
       body: box,
       buttons: [
-        el('button', { class: 'default', onClick: () => close(box.value) }, 'OK'),
+        el('button', { class: 'default', onClick: () => close(box.value) }, tr('OK')),
         el('button', { onClick: () => close() }, tr('Cancel')),
       ],
     };
