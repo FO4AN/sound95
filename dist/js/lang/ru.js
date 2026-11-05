@@ -126,6 +126,7 @@ export default {
   "No public playlists.": "Нет открытых плейлистов.",
   "No public tracks.": "Нет открытых треков.",
   "No tracks found for \"{query}\".": "Треки по запросу «{query}» не найдены.",
+  "None of these tracks can be played here.": "Ни один из этих треков нельзя здесь воспроизвести.",
   "Not Now": "Не сейчас",
   "Nothing found. Try a shorter title.": "Ничего не найдено. Попробуйте название короче.",
   "Nothing played yet.": "Пока ничего не слушали.",

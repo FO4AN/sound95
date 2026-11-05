@@ -126,6 +126,7 @@ export default {
   "No public playlists.": "Keine öffentlichen Playlists.",
   "No public tracks.": "Keine öffentlichen Titel.",
   "No tracks found for \"{query}\".": "Keine Titel für „{query}“ gefunden.",
+  "None of these tracks can be played here.": "Keiner dieser Titel kann hier abgespielt werden.",
   "Not Now": "Nicht jetzt",
   "Nothing found. Try a shorter title.": "Nichts gefunden. Versuchen Sie einen kürzeren Titel.",
   "Nothing played yet.": "Noch nichts gespielt.",

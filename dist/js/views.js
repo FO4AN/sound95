@@ -337,8 +337,10 @@ function playButton(getTracks) {
     class: 'default',
     onClick: () => {
       // The player drops blocked tracks, so a list of only those must not reach it.
-      const t = getTracks().filter((x) => x.access !== 'blocked');
+      const all = getTracks();
+      const t = all.filter((x) => x.access !== 'blocked');
       if (t.length) playList(t, 0);
+      else if (all.length) setStatus(tr('None of these tracks can be played here.'));
     },
   }, icon('play'), tr('Play'));
 }
