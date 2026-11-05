@@ -265,11 +265,13 @@ function dropWidget() {
   slot().replaceChildren();
 }
 
-function failed(track) {
+/** `skip` is false when the fault isn't the track's, and the next one would fail too. */
+function failed(track, { skip = true } = {}) {
   clearTimeout(startTimer);
   player.loading = false;
   player.playing = false;
-  if (skips < MAX_SKIPS && player.index < player.queue.length - 1) {
+  // Without a connection every track fails, and skipping would only lose your place.
+  if (skip && navigator.onLine !== false && skips < MAX_SKIPS && player.index < player.queue.length - 1) {
     skips += 1;
     setStatus(tr('Could not play "{title}". Skipping.', { title: track.title }));
     next();
@@ -299,7 +301,7 @@ function eventPosition(e) {
 function createWidget(track) {
   if (!window.SC?.Widget) {
     const mine = generation;
-    const give = () => { if (mine === generation) failed(track); };
+    const give = () => { if (mine === generation) failed(track, { skip: false }); };
     fetchWidgetApi().then(() => {
       if (window.SC?.Widget && mine === generation) createWidget(track);
       else give();
