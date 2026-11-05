@@ -9,7 +9,7 @@ use std::{
         atomic::{AtomicBool, Ordering},
         Arc, Mutex,
     },
-    thread,
+    thread::{self, JoinHandle},
     time::Duration,
 };
 use tauri::{AppHandle, Emitter};
@@ -184,6 +184,8 @@ fn run(app: AppHandle, stop: Arc<AtomicBool>) {
 #[derive(Default)]
 pub struct Visual {
     running: Mutex<Option<Arc<AtomicBool>>>,
+    /// Captures that may still be closing, stopped or not, for quitting to wait on.
+    threads: Mutex<Vec<JoinHandle<()>>>,
 }
 
 impl Visual {
@@ -196,15 +198,36 @@ impl Visual {
         if !capture::available() {
             return false;
         }
-        let stop = Arc::new(AtomicBool::new(false));
-        *running = Some(stop.clone());
-        thread::spawn(move || run(app, stop));
+        *running = Some(self.spawn(move |stop| run(app, stop)));
         true
     }
 
+    /// Runs `work` on a thread of its own, until the flag it's given is set.
+    fn spawn(&self, work: impl FnOnce(Arc<AtomicBool>) + Send + 'static) -> Arc<AtomicBool> {
+        let stop = Arc::new(AtomicBool::new(false));
+        let flag = stop.clone();
+        let mut threads = self.threads.lock().expect("visual");
+        threads.retain(|thread| !thread.is_finished());
+        threads.push(thread::spawn(move || work(flag)));
+        stop
+    }
+
+    /// Asks the capture to stop, without waiting for it.
     pub fn stop(&self) {
         if let Some(stop) = self.running.lock().expect("visual").take() {
             stop.store(true, Ordering::Relaxed);
+        }
+    }
+
+    /// Stops the capture and waits until it has closed. The process ends as soon
+    /// as the app quits, threads and all, and a capture that's cut off there
+    /// leaves what it started running: on Linux, a pw-dump that may wait hours
+    /// for the next change to the audio graph before it notices we've gone.
+    pub fn shutdown(&self) {
+        self.stop();
+        let threads = std::mem::take(&mut *self.threads.lock().expect("visual"));
+        for thread in threads {
+            let _ = thread.join();
         }
     }
 }
@@ -256,6 +279,39 @@ mod tests {
             loud.peak,
             quiet.peak
         );
+    }
+
+    /// A stand-in for a capture: it takes a frame to notice the flag, and another
+    /// to close, as killing pw-dump and the taps does.
+    fn slow_capture(visual: &Visual) -> Arc<AtomicBool> {
+        let closed = Arc::new(AtomicBool::new(false));
+        let done = closed.clone();
+        *visual.running.lock().unwrap() = Some(visual.spawn(move |stop| {
+            while !stop.load(Ordering::Relaxed) {
+                thread::sleep(FRAME);
+            }
+            thread::sleep(FRAME);
+            done.store(true, Ordering::Relaxed);
+        }));
+        closed
+    }
+
+    #[test]
+    fn quitting_waits_for_the_capture_to_close() {
+        let visual = Visual::default();
+        let closed = slow_capture(&visual);
+        visual.shutdown();
+        assert!(closed.load(Ordering::Relaxed));
+    }
+
+    #[test]
+    fn quitting_waits_for_a_capture_that_was_already_stopped() {
+        let visual = Visual::default();
+        let closed = slow_capture(&visual);
+        // As when the page stops the visualizer, or the window closes, just before.
+        visual.stop();
+        visual.shutdown();
+        assert!(closed.load(Ordering::Relaxed));
     }
 
     #[test]

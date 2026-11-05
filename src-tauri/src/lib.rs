@@ -17,7 +17,7 @@ use std::{
     time::Duration,
 };
 use store::Token;
-use tauri::{AppHandle, Manager, State, WindowEvent};
+use tauri::{AppHandle, Manager, RunEvent, State, WindowEvent};
 use tauri_plugin_opener::OpenerExt;
 use tokio::sync::Mutex;
 use url::Url;
@@ -306,6 +306,8 @@ fn quit(handle: AppHandle) {
 /// fresh process.
 #[tauri::command]
 fn relaunch(handle: tauri::AppHandle) {
+    // On the main thread, as this is, restarting skips RunEvent::Exit.
+    handle.state::<visual::Visual>().shutdown();
     handle.restart();
 }
 
@@ -438,8 +440,17 @@ pub fn run() {
             quit,
             relaunch
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running Sound95");
+        .build(tauri::generate_context!())
+        .expect("error while running Sound95")
+        .run(|app, event| {
+            // The process ends right after this, with no thread waited for. Quit
+            // from the tray or the menu doesn't destroy the window first either.
+            if let RunEvent::Exit = event {
+                if let Some(visual) = app.try_state::<visual::Visual>() {
+                    visual.shutdown();
+                }
+            }
+        });
 }
 
 #[cfg(test)]

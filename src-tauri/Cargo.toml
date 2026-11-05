@@ -31,6 +31,9 @@ discord-rich-presence = "1.1.0"
 [target."cfg(windows)".dependencies]
 wasapi = "0.26.0"
 
+[target.'cfg(target_os = "linux")'.dependencies]
+libc = "0.2"
+
 # A smaller download and install. Panics must keep unwinding: the tray is built
 # inside catch_unwind, and Linux systems without a tray library rely on that.
 [profile.release]

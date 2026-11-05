@@ -7,7 +7,8 @@ use serde_json::Value;
 use std::{
     collections::{HashMap, VecDeque},
     fs,
-    io::{BufReader, Read},
+    io::{self, BufReader, Read},
+    os::unix::process::CommandExt,
     process::{Child, ChildStdout, Command, Stdio},
     sync::{
         atomic::{AtomicBool, AtomicU32, Ordering},
@@ -188,10 +189,32 @@ struct Watch {
     closed: AtomicBool,
 }
 
+/// Has the system end `command`'s process if the thread that starts it ends first,
+/// as it does when Sound95 crashes or is killed. pw-dump only writes when the audio
+/// graph changes, so it can be a long time finding out that nobody's reading.
+fn ends_with_this_thread(command: &mut Command) -> &mut Command {
+    let parent = std::process::id();
+    // SAFETY: this runs between fork and exec, and prctl and getppid are plain
+    // system calls that are safe there. Nothing here allocates.
+    unsafe {
+        command.pre_exec(move || {
+            if libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGTERM as libc::c_ulong) != 0 {
+                return Err(io::Error::last_os_error());
+            }
+            // We may have gone before that took hold, and then it never fires.
+            if libc::getppid() as u32 != parent {
+                return Err(io::Error::from_raw_os_error(libc::ESRCH));
+            }
+            Ok(())
+        })
+    }
+}
+
 impl Watch {
-    /// Starts pw-dump, unless the capture closed meanwhile.
+    /// Starts pw-dump, unless the capture closed meanwhile. It's started from the
+    /// thread that follows the graph, which ends it before returning.
     fn start(&self) -> Option<ChildStdout> {
-        let mut child = Command::new("pw-dump")
+        let mut child = ends_with_this_thread(&mut Command::new("pw-dump"))
             .arg("--monitor")
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
@@ -608,5 +631,22 @@ mod tests {
         assert_eq!(OUTPUT_MS.load(Ordering::Relaxed), 314);
         measured(Some(20));
         assert_eq!(OUTPUT_MS.load(Ordering::Relaxed), 20);
+    }
+
+    #[test]
+    fn a_watcher_does_not_outlive_the_thread_that_started_it() {
+        use std::os::unix::process::ExitStatusExt;
+        let started = thread::spawn(|| {
+            ends_with_this_thread(Command::new("sleep").arg("10"))
+                .stdin(Stdio::null())
+                .spawn()
+                .expect("sleep")
+        });
+        // The thread is gone once it has been joined, without having ended sleep.
+        let mut child = started.join().expect("thread");
+        let begun = Instant::now();
+        let status = child.wait().expect("wait");
+        assert_eq!(status.signal(), Some(libc::SIGTERM));
+        assert!(begun.elapsed() < Duration::from_secs(5));
     }
 }
