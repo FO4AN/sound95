@@ -63,12 +63,19 @@ export function waveformView(track, { onPlay }) {
     }
   }
 
-  whileShown(canvas, onProgress, draw);
+  // Mice can report far more often than the screen shows, so hovering draws once a frame.
+  let queued = 0;
+  const drawSoon = () => {
+    if (!queued) queued = requestAnimationFrame(() => { queued = 0; draw(); });
+  };
+
+  // Only the playing track's cursor moves as it plays.
+  whileShown(canvas, onProgress, () => { if (isCurrent()) draw(); });
   whileShown(canvas, onPlayerChange, draw);
   new ResizeObserver(draw).observe(canvas);
 
-  frame.addEventListener('mousemove', (e) => { hover = e.offsetX; draw(); });
-  frame.addEventListener('mouseleave', () => { hover = null; draw(); });
+  frame.addEventListener('mousemove', (e) => { hover = e.offsetX; drawSoon(); });
+  frame.addEventListener('mouseleave', () => { hover = null; drawSoon(); });
   frame.addEventListener('click', (e) => {
     const ratio = e.offsetX / canvas.clientWidth;
     if (isCurrent()) seekTo(ratio);
