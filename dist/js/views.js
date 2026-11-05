@@ -627,9 +627,11 @@ async function trackView(route, alive) {
   const track = trackDetails(raw);
   const blocked = track.access === 'blocked';
   const isCurrent = () => player.current?.urn === track.urn;
-  const play = () => {
+  // From `ratio` of the way in, for a click on the waveform.
+  const play = (ratio) => {
     const inList = route.list?.[route.index]?.urn === track.urn;
-    playList(inList ? route.list : [track], inList ? route.index : 0);
+    const start = ratio != null && track.duration ? ratio * track.duration : null;
+    playList(inList ? route.list : [track], inList ? route.index : 0, start);
   };
 
   const playToggle = el('button', {
@@ -676,7 +678,7 @@ async function trackView(route, alive) {
       }, icon('mic'), tr('Karaoke')),
       track.link ? el('button', { onClick: () => api.open(track.link) }, tr('Open on SoundCloud')) : null),
     // A blocked track can't play, so clicking its waveform does nothing.
-    track.waveform ? el('div', { class: 'wave-row' }, waveformView(track, { onPlay: blocked ? () => {} : play })) : null,
+    track.waveform ? el('div', { class: 'wave-row' }, waveformView(track, { onPlay: blocked ? null : play })) : null,
     tabs([['details', tr('Details')], ['lyrics', tr('Lyrics')], ['related', tr('Related Tracks')]], tab,
       (id) => { if (id !== tab) go({ ...route, tab: id }); }),
     body);

@@ -26,9 +26,10 @@ export function loudness(link) {
   return cache.get(link);
 }
 
-export function waveformView(track, { onPlay }) {
+/** `onPlay(ratio)` starts the track from a click; without it the waveform only shows. */
+export function waveformView(track, { onPlay = null } = {}) {
   const canvas = el('canvas', { class: 'wave-canvas' });
-  const frame = el('div', { class: 'wave sunken', title: tr('Click to jump here') }, canvas);
+  const frame = el('div', { class: 'wave sunken', title: onPlay ? tr('Click to jump here') : null }, canvas);
   let samples = null;
   let hover = null;
 
@@ -74,13 +75,15 @@ export function waveformView(track, { onPlay }) {
   whileShown(canvas, onPlayerChange, draw);
   new ResizeObserver(draw).observe(canvas);
 
-  frame.addEventListener('mousemove', (e) => { hover = e.offsetX; drawSoon(); });
-  frame.addEventListener('mouseleave', () => { hover = null; drawSoon(); });
-  frame.addEventListener('click', (e) => {
-    const ratio = e.offsetX / canvas.clientWidth;
-    if (isCurrent()) seekTo(ratio);
-    else onPlay(ratio);
-  });
+  if (onPlay) {
+    frame.addEventListener('mousemove', (e) => { hover = e.offsetX; drawSoon(); });
+    frame.addEventListener('mouseleave', () => { hover = null; drawSoon(); });
+    frame.addEventListener('click', (e) => {
+      const ratio = e.offsetX / canvas.clientWidth;
+      if (isCurrent()) seekTo(ratio);
+      else onPlay(ratio);
+    });
+  }
 
   loudness(track.waveform).then((values) => { samples = values; draw(); });
   return frame;
