@@ -116,7 +116,14 @@ impl Wanted {
                 self.stale |= self.playing != playing;
                 self.playing = playing;
             }
-            Msg::Off => *self = Self::default(),
+            // Stale, because an On that's read in the same batch keeps the
+            // connection, and whatever it shows then has to be sent again.
+            Msg::Off => {
+                *self = Self {
+                    stale: true,
+                    ..Self::default()
+                }
+            }
         }
     }
 }
@@ -417,6 +424,37 @@ mod tests {
         let mut socket = discord.accept(Duration::from_secs(5));
         Discord::welcome(&mut socket);
         assert_eq!(shown(&mut socket)["details"], "HELLO");
+
+        drop(sender);
+        assert!(shown(&mut socket).is_null());
+        worker.join().unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn off_and_on_again_while_discord_is_busy_clears_the_old_track() {
+        use fake::*;
+        let discord = Discord::start("busy");
+        let (sender, updates) = mpsc::channel();
+        let worker = thread::spawn(move || run("123", RETRY, updates));
+        sender.send(Msg::Show(Some(playing()))).unwrap();
+        let mut socket = discord.accept(Duration::from_secs(5));
+        Discord::welcome(&mut socket);
+        assert_eq!(shown(&mut socket)["details"], "HELLO");
+
+        // While Discord takes its time over an update, presence is switched off
+        // and on again with nothing playing.
+        let mut later = playing();
+        later.title = "LATER".into();
+        sender.send(Msg::Show(Some(later))).unwrap();
+        assert_eq!(
+            read_frame(&mut socket)["args"]["activity"]["details"],
+            "LATER"
+        );
+        sender.send(Msg::Off).unwrap();
+        sender.send(Msg::Show(None)).unwrap();
+        write_frame(&mut socket, "{}");
+        assert!(shown(&mut socket).is_null());
 
         drop(sender);
         assert!(shown(&mut socket).is_null());
