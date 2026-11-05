@@ -221,10 +221,12 @@ export function showMenu(items, x, y, { below, className, onClose, header } = {}
 
   const onDown = (e) => { if (!menu.contains(e.target)) closeMenu(); };
   const onKey = (e) => { if (e.key === 'Escape') closeMenu(); };
-  setTimeout(() => document.addEventListener('mousedown', onDown), 0);
+  // A menu closed before this runs mustn't leave it behind to close every later menu.
+  const listen = setTimeout(() => document.addEventListener('mousedown', onDown), 0);
   document.addEventListener('keydown', onKey);
   openMenu = () => {
     leave(menu);
+    clearTimeout(listen);
     document.removeEventListener('mousedown', onDown);
     document.removeEventListener('keydown', onKey);
     onClose?.();
