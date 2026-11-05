@@ -241,6 +241,8 @@ button.caption:active:not(:disabled) { padding: 1px 0 0 1px; }
   position: fixed;
   z-index: 50;
   min-width: 170px;
+  max-height: calc(100vh - 4px); /* a window shorter than the menu scrolls it */
+  overflow-y: auto;
   padding: 3px;
   background: var(--face);
   box-shadow: var(--raised);

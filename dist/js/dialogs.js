@@ -197,9 +197,11 @@ export function showMenu(items, x, y, { below, className, onClose, header } = {}
   else menu.append(...rows);
   overlays().append(menu);
 
-  const rect = menu.getBoundingClientRect();
-  const left = Math.min(x, window.innerWidth - rect.width - 2);
-  const top = below != null ? below - rect.height : Math.min(y, window.innerHeight - rect.height - 2);
+  // Layout size: Modern's opening animation starts the menu smaller than it ends up.
+  const w = menu.offsetWidth;
+  const h = menu.offsetHeight;
+  const left = Math.min(x, window.innerWidth - w - 2);
+  const top = below != null ? below - h : Math.min(y, window.innerHeight - h - 2);
   menu.style.left = `${Math.max(0, left)}px`;
   menu.style.top = `${Math.max(0, top)}px`;
 
