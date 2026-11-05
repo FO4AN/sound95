@@ -288,20 +288,32 @@ function renderTime() {
   fill($('seek'));
 }
 
+function queueRow(t, i) {
+  return el('div', { class: 'q-item', title: `${t.artist} - ${t.title}`, onDblclick: () => jumpTo(i) },
+    el('button', { class: 'link q-art', title: tr('Open track page'), onClick: () => openTrack(t, player.queue, i) },
+      t.artwork ? el('img', { src: t.artwork, alt: '', loading: 'lazy' }) : el('span', { class: 'q-blank' }, icon('note'))),
+    el('div', { class: 'q-text' }, el('div', {}, t.title), el('div', { class: 'q-artist' }, t.artist)));
+}
+
+// The queue is only ever replaced or grown, so most player events (play, pause,
+// seek, the next track) leave its rows alone and just move the highlight.
+let shownQueue = null;
+let shownLength = 0;
+
 function renderQueue() {
   const list = $('queue-list');
-  if (!player.queue.length) {
-    clear(list, el('div', { class: 'tree-empty', style: 'padding:6px' }, tr('Nothing queued.')));
-    return;
+  const queue = player.queue;
+  if (queue !== shownQueue || queue.length !== shownLength) {
+    shownQueue = queue;
+    shownLength = queue.length;
+    if (queue.length) clear(list, queue.map(queueRow));
+    else clear(list, el('div', { class: 'tree-empty', style: 'padding:6px' }, tr('Nothing queued.')));
   }
-  clear(list, player.queue.map((t, i) => el('div', {
-    class: `q-item${i === player.index ? ' current' : ''}${i < player.index ? ' past' : ''}`,
-    title: `${t.artist} - ${t.title}`,
-    onDblclick: () => jumpTo(i),
-  },
-  el('button', { class: 'link q-art', title: tr('Open track page'), onClick: () => openTrack(t, player.queue, i) },
-    t.artwork ? el('img', { src: t.artwork, alt: '', loading: 'lazy' }) : el('span', { class: 'q-blank' }, icon('note'))),
-  el('div', { class: 'q-text' }, el('div', {}, t.title), el('div', { class: 'q-artist' }, t.artist)))));
+  if (!queue.length) return;
+  [...list.children].forEach((row, i) => {
+    row.classList.toggle('current', i === player.index);
+    row.classList.toggle('past', i < player.index);
+  });
 }
 
 function toggleQueue() {
@@ -471,6 +483,7 @@ onLanguageChange(() => {
   renderMenubar();
   renderSidebar();
   renderAccount();
+  shownQueue = null;
   renderPlayer();
   refresh();
   for (const [open, toggle] of [[visualizerOpen, toggleVisualizer], [karaokeOpen, toggleKaraoke]]) {
