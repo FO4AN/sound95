@@ -28,6 +28,8 @@ const QUIET: Duration = Duration::from_millis(250);
 const GRAPH_RATE: f64 = 48_000.0;
 const GRAPH_QUANTUM: f64 = 1024.0;
 const MAX_OUTPUT_MS: f64 = 1000.0;
+/// What each tap is called in the graph, so it isn't taken for the device.
+const TAP_NAME: &str = "sound95-visualizer";
 
 /// Pausing or changing track doesn't change the device, so a delay holds until
 /// another is measured. A capture started after a long pause begins with it too.
@@ -110,9 +112,20 @@ fn output_delay_ms(objects: &[&Value], streams: &[Stream]) -> Option<u32> {
         id.as_u64()
             .is_some_and(|n| streams.iter().any(|s| s.node == n))
     };
+    // Our taps are linked to the stream too, but nobody hears through them. A
+    // closing stream loses its links one at a time, and once the device's are
+    // gone a tap's alone would pass for a device with no delay.
+    let taps: Vec<&Value> = objects
+        .iter()
+        .filter(|o| {
+            o["type"] == "PipeWire:Interface:Node" && o["info"]["props"]["node.name"] == TAP_NAME
+        })
+        .map(|o| &o["id"])
+        .collect();
     let devices: Vec<&Value> = infos("PipeWire:Interface:Link")
         .filter(|link| is_ours(&link["output-node-id"]))
         .map(|link| &link["input-node-id"])
+        .filter(|node| !taps.contains(node))
         .collect();
     if devices.is_empty() {
         return None;
@@ -282,7 +295,7 @@ fn tap(serial: u64) -> Option<Tap> {
         .args(["--latency", "1024"])
         .args(raw_flag())
         .arg("-P")
-        .arg("{ node.dont-fallback=true node.dont-reconnect=true node.dont-move=true node.name=sound95-visualizer media.name=Visualizer }")
+        .arg(format!("{{ node.dont-fallback=true node.dont-reconnect=true node.dont-move=true node.name={TAP_NAME} media.name=Visualizer }}"))
         .arg("-")
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
@@ -528,6 +541,35 @@ mod tests {
         assert!(graph.0.contains_key(&3) && graph.0.contains_key(&9));
         graph.apply(json!({ "not": "a batch" }));
         assert_eq!(graph.0.len(), 2);
+    }
+
+    #[test]
+    fn a_closing_stream_keeps_the_delay() {
+        let ours = |pid| pid == 10;
+        let mut graph = Graph::default();
+        graph.apply(json!([
+            { "id": 7, "type": "PipeWire:Interface:Node", "info": { "state": "running", "props": {
+                "media.class": "Stream/Output/Audio", "object.serial": 107, "application.process.id": 10,
+            } } },
+            { "id": 8, "type": "PipeWire:Interface:Link", "info": { "output-node-id": 7, "input-node-id": 50 } },
+            { "id": 9, "type": "PipeWire:Interface:Port", "info": {
+                "direction": "input", "props": { "node.id": 50 },
+                "params": { "Latency": [{ "direction": "Input", "maxNs": 314000000.0 }] },
+            } },
+            { "id": 20, "type": "PipeWire:Interface:Node", "info": { "state": "running", "props": {
+                "media.class": "Stream/Input/Audio", "node.name": TAP_NAME,
+            } } },
+            { "id": 21, "type": "PipeWire:Interface:Link", "info": { "output-node-id": 7, "input-node-id": 20 } },
+            { "id": 22, "type": "PipeWire:Interface:Port", "info": {
+                "direction": "input", "props": { "node.id": 20 },
+                "params": { "Latency": [{ "direction": "Input", "maxNs": 0.0 }] },
+            } },
+        ]));
+        assert_eq!(graph.targets(ours), (vec![107], Some(314)));
+        // PipeWire takes a closing stream's links down one at a time while the
+        // stream still reads as running, and the device's can go before the tap's.
+        graph.apply(json!([{ "id": 8, "info": null }]));
+        assert_eq!(graph.targets(ours), (vec![107], None));
     }
 
     #[test]
