@@ -171,6 +171,11 @@ html[data-skin="modern"], html[data-skin="modern"] body {
 [data-skin="modern"] .menu-title.open { background: var(--hover-strong); color: var(--text); }
 
 [data-skin="modern"] .toolbar { grid-area: tools; height: auto; padding: 0 0 0 12px; gap: 8px; box-shadow: none; }
+/* In a narrow window the toolbar stays in its cell instead of spreading over the
+   window buttons, which would then take no clicks. Clip, unlike hidden, can't be
+   scrolled by focusing a button that's cut off, and leaves room for focus rings. */
+[data-skin="modern"] .toolbar { min-width: 0; overflow: hidden; overflow: clip; overflow-clip-margin: 4px; }
+[data-skin="modern"] #titlebar .titlebar-buttons { position: relative; z-index: 1; }
 [data-skin="modern"] .toolbar .tool-sep, [data-skin="modern"] .address > span, [data-skin="modern"] #search-go { display: none; }
 [data-skin="modern"] .toolbar button.tool { flex: none; width: 34px; height: 34px; min-height: 34px; background: var(--card); color: var(--text); }
 [data-skin="modern"] .toolbar button.tool:hover:not(:disabled) { background: var(--card-hover); transform: scale(1.04); }
@@ -417,6 +422,19 @@ html[data-skin="modern"], html[data-skin="modern"] body {
 }
 @media (max-width: 760px) {
   [data-skin="modern"] .tree-item { justify-content: center; padding: 0; }
+}
+/* Room for the search box as the window narrows, down to the smallest window
+   Windows allows. Back and Forward still work with Alt+Left/Right, and Home is
+   first in the library. */
+@media (max-width: 700px) {
+  [data-skin="modern"] #nav-back, [data-skin="modern"] #nav-forward, [data-skin="modern"] .account span { display: none; }
+  [data-skin="modern"] button.account, [data-skin="modern"] button.account:active:not(:disabled) { width: 34px; padding: 0; justify-content: center; }
+  [data-skin="modern"] .account svg { margin-left: 0; }
+}
+@media (max-width: 560px) {
+  [data-skin="modern"] #nav-home { display: none; }
+  [data-skin="modern"] .menu-title { padding: 5px 4px; }
+  [data-skin="modern"] .toolbar { padding-left: 4px; gap: 6px; }
 }
 
 /* ---------- Welcome ---------- */
