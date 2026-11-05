@@ -28,8 +28,11 @@ export function dialog(title, build, { width } = {}) {
     const dismiss = () => (onDismiss ? onDismiss() : close(undefined));
     const onKey = (e) => {
       if (e.key === 'Escape') { e.stopPropagation(); dismiss(); }
-      if (e.key === 'Enter' && e.target.tagName !== 'BUTTON') {
+      // Enter in a text box starts a new line; Ctrl+Enter sends it.
+      const newLine = e.target.tagName === 'TEXTAREA' && !e.ctrlKey && !e.metaKey;
+      if (e.key === 'Enter' && e.target.tagName !== 'BUTTON' && !newLine) {
         e.stopPropagation();
+        e.preventDefault();
         scrim.querySelector('button.default:not(:disabled)')?.click();
       }
     };
@@ -41,7 +44,7 @@ export function dialog(title, build, { width } = {}) {
     if (width) win.style.width = `${width}px`;
     scrim.append(win);
     overlays().append(scrim);
-    (scrim.querySelector('input') || scrim.querySelector('button.default'))?.focus();
+    (scrim.querySelector('input, textarea') || scrim.querySelector('button.default'))?.focus();
   });
 }
 
