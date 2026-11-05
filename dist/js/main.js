@@ -480,8 +480,11 @@ document.addEventListener('keydown', (e) => {
   const editing = target.isContentEditable || target.tagName === 'TEXTAREA'
     || (target.tagName === 'INPUT' && !['range', 'checkbox', 'button', 'file'].includes(target.type));
   if (e.key === 'Tab') clicked = null;
+  // WebView2 reloads the whole app on F5 and Ctrl+R, which would stop the music too.
+  const reload = e.key === 'F5' || (e.ctrlKey && (e.code === 'KeyR' || e.key.toLowerCase() === 'r'));
+  if (reload) e.preventDefault();
   if (document.querySelector('.scrim:not(.leaving)')) return;
-  if (e.key === 'F5') { e.preventDefault(); refresh(); }
+  if (e.key === 'F5') refresh();
   if (!editing && e.ctrlKey && e.key === 'ArrowRight') { e.preventDefault(); next(); }
   if (!editing && e.ctrlKey && e.key === 'ArrowLeft') { e.preventDefault(); prev(); }
   if (e.ctrlKey && e.key === 'l') { e.preventDefault(); $('search-box').select(); }
