@@ -4,7 +4,12 @@ use crate::store::{Store, Token};
 use reqwest::{header, Method, StatusCode};
 use serde::Serialize;
 use serde_json::Value;
-use std::{path::PathBuf, time::Duration};
+use std::{
+    fs,
+    io::ErrorKind,
+    path::{Path, PathBuf},
+    time::Duration,
+};
 use tokio::sync::Mutex;
 use url::Url;
 
@@ -57,6 +62,15 @@ fn api_base() -> String {
 const WAVE_HOST: &str = "wave.sndcdn.com";
 const REFUSAL_FILE: &str = "last-refusal.txt";
 const LONGEST_REFUSAL: usize = 600;
+
+/// Deletes a saved session. One that can't be deleted (on Windows another
+/// program may have it open) is emptied instead, which loads as logged off.
+fn erase(path: &Path) -> std::io::Result<()> {
+    match fs::remove_file(path) {
+        Err(e) if e.kind() != ErrorKind::NotFound => fs::write(path, b"{}").map_err(|_| e),
+        _ => Ok(()),
+    }
+}
 
 pub struct Client {
     pub http: reqwest::Client,
@@ -241,10 +255,19 @@ impl Client {
         let _ = std::fs::write(self.path.with_file_name(REFUSAL_FILE), note);
     }
 
+    /// Deletes the saved session rather than saving an empty one: if that save
+    /// failed, the token would still be on disk and the next launch logged in.
     pub async fn logout(&self) -> Result<(), AppError> {
         let mut store = self.store.lock().await;
         store.user = None;
-        self.persist(&store)
+        // A save that failed at the rename leaves the token in its temporary file.
+        let tmp = erase(&self.path.with_extension("tmp"));
+        erase(&self.path).and(tmp).map_err(|e| {
+            AppError::new(
+                "storage",
+                format!("Could not remove the saved session: {e}"),
+            )
+        })
     }
 }
 
@@ -296,6 +319,45 @@ mod tests {
         ] {
             assert_eq!(c.waveform(bad).await.unwrap_err().code, "bad_request");
         }
+    }
+
+    /// A client with a saved session, in a folder of its own.
+    async fn logged_on_client(name: &str) -> (Client, PathBuf) {
+        let dir = std::env::temp_dir().join(format!("sound95-{name}-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        let path = dir.join("session.json");
+        let c = Client::new(path.clone());
+        let token = Token {
+            access: "secret".into(),
+        };
+        c.set_session(token).await.unwrap();
+        (c, path)
+    }
+
+    async fn logged_on(c: &Client) -> bool {
+        c.access_token().await.is_ok()
+    }
+
+    #[tokio::test]
+    async fn logging_off_leaves_no_session_on_disk() {
+        let (c, path) = logged_on_client("logoff").await;
+        let tmp = path.with_extension("tmp");
+        fs::write(&tmp, r#"{"user":{"access":"secret"}}"#).unwrap();
+        c.logout().await.unwrap();
+        assert!(!path.exists() && !tmp.exists());
+        assert!(!logged_on(&Client::new(path.clone())).await);
+        fs::remove_dir_all(path.parent().unwrap()).unwrap();
+    }
+
+    #[tokio::test]
+    async fn logging_off_sticks_when_saving_fails() {
+        let (c, path) = logged_on_client("logoff-unsaved").await;
+        // Saving now fails, as it would on a full disk.
+        fs::create_dir(path.with_extension("tmp")).unwrap();
+        let _ = c.logout().await;
+        assert!(!logged_on(&c).await);
+        assert!(!logged_on(&Client::new(path.clone())).await);
+        fs::remove_dir_all(path.parent().unwrap()).unwrap();
     }
 
     #[tokio::test]
