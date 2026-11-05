@@ -425,9 +425,11 @@ window.__TAURI__.event.listen('sound95:tray', ({ payload }) => {
 
 // A click leaves focus on what was clicked, and Space would then press that
 // button again (or do nothing on a slider). Space only presses a button that
-// was reached with Tab; otherwise it's play/pause.
+// was reached with Tab; otherwise it's play/pause. Pressing anything else keeps
+// the last clicked button: a scrollbar or the title bar takes the press without
+// moving focus off it.
 let clicked = null;
-document.addEventListener('pointerdown', (e) => { clicked = e.target.closest?.('button') || null; }, true);
+document.addEventListener('pointerdown', (e) => { clicked = e.target.closest?.('button') || clicked; }, true);
 
 document.addEventListener('keydown', (e) => {
   const { target } = e;
