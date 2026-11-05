@@ -7,6 +7,7 @@ import { tr } from './i18n.js';
 import { el } from './dom.js';
 import { THEMES, applyTheme, savedTheme } from './themes.js';
 import { crossfade, leave } from './motion.js';
+import { syncModal } from './dialogs.js';
 
 const DONE_KEY = 'sound95.welcomed';
 
@@ -86,7 +87,7 @@ export function welcomeIfNew(name) {
       next.focus();
     }
 
-    const win = el('div', { class: 'window welcome', role: 'dialog', ariaLabel: tr('Welcome to Sound95') },
+    const win = el('div', { class: 'window welcome', role: 'dialog', ariaModal: 'true', ariaLabel: tr('Welcome to Sound95') },
       el('div', { class: 'titlebar' }, el('span', { class: 'titlebar-text' }, tr('Welcome to Sound95'))),
       el('div', { class: 'welcome-body' }, el('div', { class: 'welcome-art' }, mark()), stage),
       el('div', { class: 'welcome-foot' }, dots, el('div', { class: 'welcome-buttons' }, back, next)));
@@ -100,10 +101,12 @@ export function welcomeIfNew(name) {
       try { localStorage.setItem(DONE_KEY, '1'); } catch { /* optional */ }
       document.removeEventListener('keydown', onKey, true);
       leave(scrim);
+      syncModal();
       resolve();
     }
     document.addEventListener('keydown', onKey, true);
     document.getElementById('overlays').append(scrim);
+    syncModal();
     go(0);
   });
 }

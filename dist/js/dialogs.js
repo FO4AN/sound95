@@ -8,6 +8,18 @@ import { leave } from './motion.js';
 
 const overlays = () => document.getElementById('overlays');
 
+/**
+ * Leaves only the topmost dialog usable: the app, its floating windows and any
+ * dialog underneath go inert, so Tab and Space can't reach what's behind the
+ * scrim. Menus and notices stay usable. Call it when a scrim opens or closes.
+ */
+export function syncModal() {
+  const open = [...overlays().querySelectorAll(':scope > .scrim:not(.leaving)')];
+  const top = open.at(-1);
+  for (const id of ['app', 'floats']) document.getElementById(id).inert = !!top;
+  for (const scrim of open) scrim.inert = scrim !== top;
+}
+
 function chrome(title, { onClose } = {}) {
   const closeButton = el('button', { class: 'caption', ariaLabel: tr('Close'), onClick: onClose }, icon('close'));
   return el('div', { class: 'titlebar' },
@@ -21,6 +33,7 @@ export function dialog(title, build, { width } = {}) {
     const scrim = el('div', { class: 'scrim' });
     const close = (value) => {
       leave(scrim);
+      syncModal();
       document.removeEventListener('keydown', onKey, true);
       resolve(value);
     };
@@ -37,13 +50,14 @@ export function dialog(title, build, { width } = {}) {
       }
     };
     document.addEventListener('keydown', onKey, true);
-    const win = el('div', { class: 'window dialog', role: 'dialog', ariaLabel: title },
+    const win = el('div', { class: 'window dialog', role: 'dialog', ariaModal: 'true', ariaLabel: title },
       chrome(title, { onClose: dismiss }),
       el('div', { class: 'dialog-body' }, body),
       buttons?.length ? el('div', { class: 'dialog-buttons' }, buttons) : null);
     if (width) win.style.width = `${width}px`;
     scrim.append(win);
     overlays().append(scrim);
+    syncModal();
     (scrim.querySelector('input, textarea') || scrim.querySelector('button.default'))?.focus();
   });
 }
