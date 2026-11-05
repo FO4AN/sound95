@@ -490,7 +490,8 @@ html[data-skin="modern"], html[data-skin="modern"] body {
 [data-motion="on"] .genres button:hover:not(:disabled) { transform: scale(1.03); }
 [data-motion="on"] input.slider::-webkit-slider-thumb { transition: opacity calc(var(--speed) * 150ms); }
 [data-motion="on"] .np-art img { animation: s95-fade-in calc(var(--speed) * 400ms) ease-out both; }
-[data-motion="on"] #backdrop > * { transition: transform calc(var(--speed) * 90ms) linear, filter calc(var(--speed) * 400ms) ease; }
+[data-motion="on"] #backdrop { transition: transform calc(var(--speed) * 90ms) linear; }
+[data-motion="on"] #backdrop > * { transition: filter calc(var(--speed) * 400ms) ease; }
 [data-motion="on"]::view-transition-old(root), [data-motion="on"]::view-transition-new(root) { animation-duration: calc(var(--speed) * 360ms); }
 
 /* With motion off, Modern doesn't ease anything either. The working indicators keep going. */
