@@ -1,12 +1,13 @@
 // Main-pane views and the back/forward history.
 
-import { tr } from './i18n.js';
+import { onLanguageChange, tr } from './i18n.js';
 import {
   api, bigArt, idOf, normalizeFeedItem, normalizePlaylist, normalizeTrack, normalizeUser, page, paths, playlistPages,
   smallArt, trackDetails,
 } from './api.js';
 import { clear, el, errorText, fmtCount, fmtTime, setStatus, whileShown } from './dom.js';
 import { icon } from './icons.js';
+import { onSkinChange } from './themes.js';
 import { dialog, prompt, showMenu } from './dialogs.js';
 import { emitChange, isLiked, onSessionChange, session, toggleLike } from './session.js';
 import { enqueue, onPlayerChange, playList, player, togglePlay } from './player.js';
@@ -16,28 +17,87 @@ import { lyricsFor, showKaraoke } from './karaoke.js';
 const DOUBLE_CLICK_MS = 220;
 
 const content = document.getElementById('content');
-const stack = [];
+const stack = []; // { route, built }: built is the page as it was left, for Back and Forward
 let cursor = -1;
 let renderToken = 0;
 const navListeners = new Set();
 export const onNavigate = (fn) => navListeners.add(fn);
-export const currentRoute = () => stack[cursor] || null;
+export const currentRoute = () => stack[cursor]?.route || null;
 export const canGoBack = () => cursor > 0;
 export const canGoForward = () => cursor < stack.length - 1;
 
 export function go(route) {
-  stack.splice(cursor + 1);
-  stack.push(route);
+  leave();
+  for (const entry of stack.splice(cursor + 1)) drop(entry);
+  stack.push({ route });
   cursor = stack.length - 1;
   render();
 }
-export function back() { if (canGoBack()) { cursor -= 1; render(); } }
-export function forward() { if (canGoForward()) { cursor += 1; render(); } }
-export function refresh() { if (currentRoute()) render(); }
+export function back() { if (canGoBack()) { leave(); cursor -= 1; show(); } }
+export function forward() { if (canGoForward()) { leave(); cursor += 1; show(); } }
+export function refresh() {
+  const entry = stack[cursor];
+  if (!entry) return;
+  drop(entry);
+  render();
+}
+
+// Back and Forward put the page back as it was left, with its More... pages and
+// scroll position, instead of fetching it again from the top.
+const KEEP_PAGES = 10;
+const kept = new Set(); // entries with a built page, least recently shown first
+let drops = 0; // a page that was loading when pages were dropped may be out of date
+
+function keep(entry, node) {
+  entry.built = { node, scrollTop: 0 };
+  kept.delete(entry);
+  kept.add(entry);
+  if (kept.size > KEEP_PAGES) drop(kept.values().next().value);
+}
+
+function drop(entry) {
+  entry.built = null;
+  kept.delete(entry);
+}
+
+/** Drops the kept pages for `routes`, so going back to them fetches them again. */
+function dropPages(routes = () => true) {
+  drops += 1;
+  for (const entry of kept) if (routes(entry.route)) drop(entry);
+}
+
+// Pages show the account, language and skin they were built with.
+onSessionChange(() => dropPages());
+onLanguageChange(() => dropPages());
+onSkinChange(() => dropPages());
+
+/** Remembers how far the shown page was scrolled, for coming back to it. */
+function leave() {
+  const built = stack[cursor]?.built;
+  if (built?.node.isConnected) built.scrollTop = content.scrollTop;
+}
+
+/** Puts back the current entry's page as it was left, or builds it again. */
+function show() {
+  const entry = stack[cursor];
+  if (!entry.built) {
+    render();
+    return;
+  }
+  renderToken += 1; // a page still loading must not replace this one
+  navListeners.forEach((fn) => fn(entry.route));
+  clear(content, entry.built.node);
+  syncRows();
+  content.scrollTop = entry.built.scrollTop;
+  kept.delete(entry);
+  kept.add(entry);
+}
 
 async function render() {
   const token = ++renderToken;
-  const route = currentRoute();
+  const since = drops;
+  const entry = stack[cursor];
+  const { route } = entry;
   navListeners.forEach((fn) => fn(route));
   content.scrollTop = 0;
   clear(content, el('div', { class: 'view note' }, tr('Loading...')));
@@ -45,6 +105,8 @@ async function render() {
     const node = await VIEWS[route.name](route, () => token === renderToken);
     if (token === renderToken) {
       clear(content, node);
+      // Track pages aren't kept: their buttons stop following the player once they leave the page.
+      if (route.name !== 'track' && since === drops) keep(entry, node);
       syncRows();
     }
   } catch (e) {
@@ -434,6 +496,7 @@ function followButton(urn) {
         await api.send(following ? 'DELETE' : 'POST', paths.follow(urn));
         following = !following;
         button.textContent = following ? tr('Unfollow') : tr('Follow');
+        dropPages((r) => r.name === 'following' || (r.name === 'user' && r.urn === urn));
       } catch (e) {
         setStatus(errorText(e));
       }
@@ -661,6 +724,7 @@ async function addToPlaylist(track) {
       const id = Number(idOf(track.urn));
       if (ids.includes(id)) return setStatus(tr('"{title}" is already in "{playlist}"', { title: track.title, playlist: target.title }));
       await api.send('PUT', paths.playlist(target.urn), { playlist: { tracks: [...ids, id] } });
+      dropPages((r) => r.name === 'playlist' && idOf(r.urn) === idOf(target.urn));
       setStatus(tr('Added "{title}" to "{playlist}"', { title: track.title, playlist: target.title }));
     } catch (e) {
       setStatus(errorText(e));
