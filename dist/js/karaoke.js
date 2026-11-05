@@ -19,6 +19,7 @@ const COUNT_IN_MS = 3000;
 const LINE_TAIL_MS = 300;
 const LAST_WORD_MS = 400; // a last word with no end of its own fills at least this long
 const RETRY_MS = 3000; // lyrics sites often fail once and then answer
+const SEARCH_TIMEOUT_MS = 60000; // past every site's own limit, so only a lost answer waits this long
 const INTRO_SHARE = 0.06; // guessed timing: where the singing starts and how long it runs
 const SINGING_SHARE = 0.9;
 
@@ -37,11 +38,19 @@ const requestFor = (track) => ({
 /** Results for a track, best first. Kept for the session, except failures. */
 export function lyricsFor(track) {
   if (!searches.has(track.urn)) {
-    const search = api.lyrics(requestFor(track));
+    // An answer that never comes would otherwise keep "Searching..." up all session.
+    const lost = new Promise((_, fail) => setTimeout(() => fail({ code: 'network', message: 'A lyrics site did not answer. Try again in a moment.' }), SEARCH_TIMEOUT_MS));
+    const search = Promise.race([api.lyrics(requestFor(track)), lost]);
     searches.set(track.urn, search);
     search.catch(() => searches.delete(track.urn));
   }
   return searches.get(track.urn);
+}
+
+/** What karaoke shows for a track: lyrics you chose, pasted or tapped, or else the best found. */
+export function chosenLyricsFor(track) {
+  const mine = saved(track.urn).custom;
+  return mine ? Promise.resolve(mine) : lyricsFor(track).then(([best]) => best || null);
 }
 
 function savedAll() {
