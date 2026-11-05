@@ -221,8 +221,9 @@ export function steadyPositionMs(at = performance.now()) {
   } else if (!player.playing || !clock.moving) {
     clock.shown = Math.max(shown, Math.min(target, shown + dt));
   } else {
+    // A frame later than SLEW_MS corrects the whole error, never more.
     const free = shown + dt;
-    clock.shown = free + Math.min(0.5 * dt, Math.max(-dt, ((target - free) * dt) / SLEW_MS));
+    clock.shown = free + Math.min(0.5 * dt, Math.max(-dt, (target - free) * Math.min(1, dt / SLEW_MS)));
   }
   return clock.shown;
 }
@@ -323,7 +324,9 @@ function createWidget(track) {
     // Sound can lag the event, so the clock waits for reports that move.
     holdClock(p ?? clock.p);
     player.playing = true;
-    if (player.loading) started(generation);
+    // A start point still waiting means the track failed to open and is playing after
+    // all, so it starts properly now: otherwise every report would wait for that seek.
+    if (player.loading || pendingSeek != null) started(generation);
     else notify();
   });
   bind(Events.PAUSE, (e) => {
