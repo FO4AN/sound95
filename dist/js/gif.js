@@ -70,8 +70,9 @@ export function decodeFrame(frame) {
   const count = frame.width * frame.height;
   const out = new Uint8Array(count);
   const { data, minCode } = frame;
-  // Codes are at most 12 bits, so a bigger start is corrupt (and would take seconds to set up).
-  if (minCode > 11) return out;
+  // Codes are at most 12 bits, so a bigger start is corrupt (and would take seconds to set
+  // up). A file cut off before this byte has none, and would spin through every pixel.
+  if (!(minCode <= 11)) return out;
   const clear = 1 << minCode;
   const end = clear + 1;
   const prefix = new Uint16Array(4096);
