@@ -423,16 +423,27 @@ window.__TAURI__.event.listen('sound95:tray', ({ payload }) => {
 
 /* ---------- Keyboard, misc ---------- */
 
+// A click leaves focus on what was clicked, and Space would then press that
+// button again (or do nothing on a slider). Space only presses a button that
+// was reached with Tab; otherwise it's play/pause.
+let clicked = null;
+document.addEventListener('pointerdown', (e) => { clicked = e.target.closest?.('button') || null; }, true);
+
 document.addEventListener('keydown', (e) => {
-  const typing = ['INPUT', 'TEXTAREA'].includes(e.target.tagName);
+  const { target } = e;
+  // Text fields keep Ctrl+Arrow for moving and selecting by word, and Space.
+  const editing = target.isContentEditable || target.tagName === 'TEXTAREA'
+    || (target.tagName === 'INPUT' && !['range', 'checkbox', 'button', 'file'].includes(target.type));
+  if (e.key === 'Tab') clicked = null;
   if (document.querySelector('.scrim:not(.leaving)')) return;
   if (e.key === 'F5') { e.preventDefault(); refresh(); }
-  if (e.ctrlKey && e.key === 'ArrowRight') { e.preventDefault(); next(); }
-  if (e.ctrlKey && e.key === 'ArrowLeft') { e.preventDefault(); prev(); }
+  if (!editing && e.ctrlKey && e.key === 'ArrowRight') { e.preventDefault(); next(); }
+  if (!editing && e.ctrlKey && e.key === 'ArrowLeft') { e.preventDefault(); prev(); }
   if (e.ctrlKey && e.key === 'l') { e.preventDefault(); $('search-box').select(); }
   if (e.altKey && e.key === 'ArrowLeft') back();
   if (e.altKey && e.key === 'ArrowRight') forward();
-  if (e.key === ' ' && !typing && e.target.tagName !== 'BUTTON') { e.preventDefault(); togglePlay(); }
+  const tabbedTo = target.tagName === 'BUTTON' && target !== clicked;
+  if (e.key === ' ' && !editing && !tabbedTo) { e.preventDefault(); if (!e.repeat) togglePlay(); }
 });
 
 document.addEventListener('contextmenu', (e) => {
