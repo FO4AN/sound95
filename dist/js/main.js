@@ -45,10 +45,13 @@ $('start-icon').append(icon('note'));
 $('win-min').addEventListener('click', () => appWindow().minimize());
 $('win-max').addEventListener('click', () => appWindow().toggleMaximize());
 $('win-close').addEventListener('click', () => appWindow().close());
-$('title-text').addEventListener('dblclick', () => appWindow().toggleMaximize());
-// Modern has no title bar; the empty parts of its top row stand in for it.
-for (const node of [$('menubar'), document.querySelector('.toolbar'), document.querySelector('.brand')]) {
-  node.addEventListener('dblclick', (e) => { if (e.target === node) appWindow().toggleMaximize(); });
+// Tauri maximizes on a double-click on a drag region by itself (the title, and
+// Modern's top row), so doing it here too would undo it. Classic's menu bar and
+// toolbar aren't drag regions, so their empty parts are handled here.
+for (const node of [$('menubar'), document.querySelector('.toolbar')]) {
+  node.addEventListener('dblclick', (e) => {
+    if (e.target === node && !node.hasAttribute('data-tauri-drag-region')) appWindow().toggleMaximize();
+  });
 }
 $('task-button').addEventListener('click', () => appWindow().minimize());
 
