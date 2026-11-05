@@ -115,7 +115,7 @@
     $('#nav-back').click();
     await check(() => byText('.tile-name', 'Night Modem'), 'back button restores people');
     $('#nav-back').click();
-    await waitFor(() => $$('.row').length, 'rows after back');
+    await check(() => $$('.row').length === 80, 'Back puts the search back with its More... rows');
 
     // Real playback through the hidden Widget.
     dbl($$('.row')[0]);
@@ -144,7 +144,8 @@
     $('#tp-next').click();
     await check(() => $('#np-title').textContent === 'Blue Screen Sunrise', 'next track');
     await check(() => $('#tp-play').getAttribute('aria-label') === 'Pause' && seconds() < 30, 'next track plays', 15000);
-    await check(() => $$('.q-item').length === 49 && $('.q-item.current'), 'Up Next excludes the blocked track and marks current');
+    // Back kept the More... page, so all 80 results are queued, less the one blocked track.
+    await check(() => $$('.q-item').length === 79 && $('.q-item.current'), 'Up Next excludes the blocked track and marks current');
 
     $('#tp-repeat').click();
     await check(() => $('#tp-repeat').classList.contains('on'), 'repeat toggles');
