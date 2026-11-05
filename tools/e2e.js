@@ -245,7 +245,14 @@
     $('#volume').dispatchEvent(new Event('input'));
     await sleep(3000); // the mock's unplayable tracks finish skipping
     dbl($$('.row')[0]);
-    await waitFor(() => $('#np-title').textContent === 'Dial-Up Lullaby' && seconds() >= 2, 'a real track playing', 20000);
+    // The Widget fetches it from SoundCloud, which a build machine sometimes waits on past
+    // the player's start timeout, and the queue moves on. One more go before giving up.
+    const realTrack = () => $('#np-title').textContent === 'Dial-Up Lullaby' && seconds() >= 2;
+    if (!(await waitFor(realTrack, 'a real track playing', 20000).catch(() => false))) {
+      await log(`INFO the real track did not start (${$('#status').textContent}), trying again`);
+      dbl($$('.row')[0]);
+      await waitFor(realTrack, 'a real track playing', 30000);
+    }
     // Bars that follow the volume all but vanish at 1%; that's checked further down.
     const viz = await import('./js/visualizer.js');
     viz.setFollowsVolume(false);
@@ -306,8 +313,9 @@
     const playingBefore = $('#np-title').textContent;
     await tray('next');
     await check(() => $('#np-title').textContent !== playingBefore, 'the tray menu skips');
+    // Straight after a skip, Previous goes back a track rather than to the start of this one.
     await tray('previous');
-    await check(() => $('#np-title').textContent === playingBefore || seconds() < 4, 'the tray menu goes back');
+    await check(() => $('#np-title').textContent === playingBefore, 'the tray menu goes back');
     await appWindow.show();
     await check(() => appWindow.isVisible(), 'the window comes back');
     await sleep(300);
