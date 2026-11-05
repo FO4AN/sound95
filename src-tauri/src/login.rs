@@ -79,11 +79,15 @@ fn session(window: &WebviewWindow) -> Option<String> {
 }
 
 /// Opens the sign-in window and waits for the session, or for the window to
-/// be closed.
-pub async fn sign_in(handle: &AppHandle) -> Result<Token, AppError> {
+/// be closed. `rejected` says no session is held, because there never was one
+/// or the API turned it down.
+pub async fn sign_in(handle: &AppHandle, rejected: bool) -> Result<Token, AppError> {
     cancel(handle);
-    // A session the API turned down would otherwise log straight back in.
-    if let Some(main) = handle.get_webview_window("main") {
+    // A session the API turned down would otherwise log straight back in. One
+    // still held keeps its cookies, the long-lived one that renews it included:
+    // if this sign-in is closed unfinished, say because SoundCloud can't be
+    // reached, that session can still be renewed later.
+    if let Some(main) = handle.get_webview_window("main").filter(|_| rejected) {
         for cookie in site_cookies(&main) {
             let _ = main.delete_cookie(cookie);
         }

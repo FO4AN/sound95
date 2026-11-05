@@ -92,7 +92,9 @@ async fn status(app: State<'_, App>) -> Result<Status, AppError> {
 
 #[tauri::command]
 async fn login(app: State<'_, App>, handle: tauri::AppHandle) -> Result<(), AppError> {
-    let token = login::sign_in(&handle).await?;
+    // A session that's still held wasn't turned down, so the cookie that renews it stays.
+    let rejected = app.client.snapshot().await.user.is_none();
+    let token = login::sign_in(&handle, rejected).await?;
     let _changing = app.changing.lock().await;
     app.client.set_session(token).await
 }
