@@ -970,17 +970,22 @@ fn netease_request(path: &str) -> RequestBuilder {
         .header(header::REFERER, "https://music.163.com/")
 }
 
-/// One search result's lyrics, if it's the song and has any.
-async fn netease_song(q: &Query, song: Option<&Value>, failed: &mut bool) -> Option<Lyrics> {
-    let song = song?;
-    let id = song["id"].as_u64()?;
-    let title = song["name"].as_str()?;
+/// Everyone a search result credits, as one name for matching.
+fn netease_artists(song: &Value) -> Option<String> {
     let artists: Vec<&str> = song["artists"]
         .as_array()?
         .iter()
         .filter_map(|a| a["name"].as_str())
         .collect();
-    let artist = artists.join(", ");
+    Some(artists.join(", "))
+}
+
+/// One search result's lyrics, if it's the song and has any.
+async fn netease_song(q: &Query, song: Option<&Value>, failed: &mut bool) -> Option<Lyrics> {
+    let song = song?;
+    let id = song["id"].as_u64()?;
+    let title = song["name"].as_str()?;
+    let artist = netease_artists(song)?;
     let seconds = song["duration"].as_f64().map(|ms| ms / 1000.0);
     let matched = match_score(q, title, &artist, seconds.map(|s| s - q.seconds))?;
     let id = id.to_string();
@@ -1027,11 +1032,12 @@ async fn netease(q: &Query, found: &mut Vec<Lyrics>, failed: &mut bool) {
         };
         let empty = Vec::new();
         let songs = results["result"]["songs"].as_array().unwrap_or(&empty);
+        // Matched the way netease_song matches them, so a featured artist counts here too.
         let mut picks = songs.iter().filter(|song| {
             let name = song["name"].as_str().unwrap_or("");
-            let singer = song["artists"][0]["name"].as_str().unwrap_or("");
+            let singers = netease_artists(song).unwrap_or_default();
             let off_by = song["duration"].as_f64().map(|ms| ms / 1000.0 - q.seconds);
-            match_score(q, name, singer, off_by).is_some()
+            match_score(q, name, &singers, off_by).is_some()
         });
         // Each lyric is a round trip of its own, so the three go out together.
         let (a, b, c) = (picks.next(), picks.next(), picks.next());
@@ -1550,6 +1556,36 @@ mod tests {
         assert!(search(plain_request())
             .await
             .is_ok_and(|found| found.is_empty()));
+    }
+
+    #[cfg(debug_assertions)]
+    #[tokio::test]
+    async fn netease_counts_every_credited_artist() {
+        let _hosts = MOCK_HOSTS.lock().await;
+        // Another cut of the song, crediting the uploader second.
+        serve(vec![
+            ("/lrclib/", 200, "[]", 0),
+            (
+                "/netease/api/search",
+                200,
+                r#"{"code":200,"result":{"songs":[{"id":1,"name":"Song","duration":230000,"artists":[{"name":"Main"},{"name":"Guest"}]}]}}"#,
+                0,
+            ),
+            (
+                "/netease/api/song",
+                200,
+                r#"{"code":200,"lrc":{"lyric":"[00:01.00]a\n[00:02.00]b\n[00:03.00]c"}}"#,
+                0,
+            ),
+            ("/genius/", 200, r#"{"response":{"sections":[]}}"#, 0),
+        ]);
+        let request = Request {
+            title: "Song".into(),
+            artist: "Guest".into(),
+            ..plain_request()
+        };
+        let found = search(request).await.expect("found");
+        assert_eq!(found.first().map(|l| l.source), Some("NetEase"));
     }
 
     #[test]
