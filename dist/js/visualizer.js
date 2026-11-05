@@ -130,8 +130,14 @@ export const outputDelayMs = () => audio.outputMs;
 
 document.addEventListener('visibilitychange', () => syncCapture());
 
+/**
+ * Whether anything shows the audio. The player bar's visualizer is hidden in a narrow
+ * window, and capturing and analysing for it then would be for nothing.
+ */
+const watched = () => audioListeners.size > 0 || [...surfaces].some((s) => s.width > 0 && s.canvas.isConnected);
+
 function syncCapture() {
-  const want = (surfaces.size > 0 || audioListeners.size > 0) && player.playing && !document.hidden;
+  const want = watched() && player.playing && !document.hidden;
   if (want) {
     clearTimeout(stopTimer);
     stopTimer = null;
@@ -579,6 +585,13 @@ function frame(now) {
     return;
   }
   drawnAt = now;
+  // Unwatched, the loop would still fetch every track's loudness to stand in for audio.
+  // A surface getting a size starts it again.
+  if (!watched()) {
+    arriving.length = 0;
+    drawing = false;
+    return;
+  }
   const going = step(now);
   for (const surface of surfaces) {
     const { canvas, mode, memory, pixel, width, height } = surface;
@@ -608,7 +621,7 @@ export function attachVisual(canvas, { mode = 'bars', pixel = 1 } = {}) {
   const resized = new ResizeObserver(([entry]) => {
     surface.width = entry.contentRect.width;
     surface.height = entry.contentRect.height;
-    wake();
+    syncCapture(); // a hidden one wants no audio, and one shown again does
   });
   const surface = {
     canvas, mode, pixel, memory: {}, width: 0, height: 0,
