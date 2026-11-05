@@ -96,6 +96,11 @@ The Release workflow builds both installers on GitHub, signs them with the
 tests fail, the release stays a draft that the updater can't see. Keep a copy of that key:
 without it, installed copies can't update to a new build.
 
+Both builds add their entries to the release's `latest.json`, which every installed copy
+reads, and one can overwrite the other's. `tools/check-latest-json.sh` keeps the release a
+draft unless that file offers the tag's version to Windows and Linux with the right
+signatures. If it says a platform is missing, re-run that platform's build job.
+
 The Linux build runs on Ubuntu 22.04, because the AppImage uses the system's glibc and so
 needs at least the one it was built on. `tools/check-glibc.sh` fails the release if that
 creeps up, and `tools/install-linux.sh` checks for it too.

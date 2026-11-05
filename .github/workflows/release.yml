@@ -87,7 +87,12 @@ jobs:
     uses: ./.github/workflows/ci.yml
 
   publish:
-    needs: [build, ci]
+    needs: [create, build, ci]
     runs-on: ubuntu-24.04
     steps:
+      - uses: actions/checkout@v4
+      # The two builds merge their entries into latest.json at the same time, and
+      # the updater only offers this version to platforms listed there.
+      - name: Check latest.json lists Windows and Linux at this version
+        run: tools/check-latest-json.sh "${{ needs.create.outputs.id }}" "${TAG#v}"
       - run: gh release edit "$TAG" --draft=false --latest
