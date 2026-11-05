@@ -521,8 +521,8 @@ setInterval(tick, 10_000);
 
 const AUDIO_TRIED = 'sound95.audioTried';
 
-async function ensureAudio() {
-  const audioState = await api.audioStatus();
+async function ensureAudio(checking) {
+  const audioState = await checking;
   if (audioState.ready) localStorage.removeItem(AUDIO_TRIED);
   if (audioState.ready) return;
   const showCommand = () => message('Sound95', tr('Sound95 could not install the audio plug-ins it needs.'), {
@@ -610,9 +610,14 @@ async function boot() {
   attachVisual($('mini-viz'));
   $('volume').value = Math.round(getVolume() * 100);
   renderVolume();
-  await ensureAudio().catch((e) => setStatus(errorText(e), { sticky: true }));
+  // The plug-in check and the session load run together, though the audio dialogs
+  // still come before the log in ones.
+  const checking = api.audioStatus();
+  const loading = loadSession();
+  loading.catch(() => {});
+  await ensureAudio(checking).catch((e) => setStatus(errorText(e), { sticky: true }));
   try {
-    const status = await loadSession();
+    const status = await loading;
     go({ name: 'home' });
     if (!status.logged_on) await logOn();
     else if (session.user) await welcomeIfNew(session.user.username);

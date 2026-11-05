@@ -360,11 +360,13 @@ function logOnPrompt(text, iconName = 'keys') {
     el('button', { class: 'default', onClick: () => window.dispatchEvent(new Event('sound95:logon')) }, tr('Log In...')));
 }
 
+const RECENT_SHOWN = 8;
+
 async function homeView(_route, alive) {
   if (!session.user) return logOnPrompt(tr('Log in to SoundCloud to start listening.'));
   const [feed, recent] = await Promise.allSettled([
     page(paths.feed(), normalizeFeedItem),
-    page(paths.recent(), normalizeTrack),
+    page(paths.recent(RECENT_SHOWN), normalizeTrack),
   ]);
   if (!alive()) return el('div');
   const root = el('div', { class: 'view' }, el('h1', { class: 'greeting' }, tr('Welcome back, {name}', { name: session.user.username })));
@@ -374,7 +376,7 @@ async function homeView(_route, alive) {
   }
   if (recent.status === 'fulfilled' && recent.value.items.length) {
     root.append(el('div', { class: 'shelf-title' }, tr('Recently Played')),
-      trackList({ items: recent.value.items.slice(0, 8), next: null }, null).node);
+      trackList({ items: recent.value.items.slice(0, RECENT_SHOWN), next: null }, null).node);
   }
   if (feed.status === 'fulfilled' && feed.value.items.length) {
     const { node } = trackList(feed.value, (t) => page(t, normalizeFeedItem));

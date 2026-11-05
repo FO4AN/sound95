@@ -165,7 +165,7 @@ const paged = (path, params = {}) => url(path, { limit: PAGE, linked_partitionin
 
 export const paths = {
   feed: () => paged('/stream'),
-  recent: () => paged('/me/play-history/tracks'),
+  recent: (limit = PAGE) => paged('/me/play-history/tracks', { limit }),
   likes: (limit = PAGE) => paged(`/users/${me}/track_likes`, { limit }),
   likeIds: () => url('/me/track_likes/ids', { limit: MAX_IDS }),
   myPlaylists: () => paged(`/users/${me}/playlists_without_albums`),
