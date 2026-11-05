@@ -8,9 +8,12 @@
 
 use crate::client::AppError;
 use crate::store::Token;
-use std::time::{Duration, Instant};
+use std::{
+    sync::{Arc, Mutex},
+    time::{Duration, Instant},
+};
 use tauri::{
-    webview::{Cookie, NewWindowResponse},
+    webview::{Cookie, NewWindowResponse, PageLoadEvent},
     AppHandle, Manager, WebviewUrl, WebviewWindow, WebviewWindowBuilder,
 };
 use url::Url;
@@ -24,6 +27,9 @@ const RENEW_URL: &str = "https://soundcloud.com/";
 const SESSION_COOKIE: &str = "oauth_token";
 const POLL: Duration = Duration::from_millis(400);
 const RENEW_TIMEOUT: Duration = Duration::from_secs(20);
+/// How long SoundCloud gets, once its page has loaded, to hand out a session.
+/// Long enough for the site's own scripts on a slow link.
+const RENEW_GRACE: Duration = Duration::from_secs(5);
 /// SoundCloud's pages can start playing as they load, which would sound over
 /// Sound95 and count as a play. These windows are never there for the audio, so
 /// `play` fails the way it does when a browser blocks autoplay.
@@ -104,6 +110,22 @@ pub async fn sign_in(handle: &AppHandle) -> Result<Token, AppError> {
     }
 }
 
+/// When the renew page last finished loading, after one more load event.
+fn last_load(before: Option<Instant>, url: &Url, event: PageLoadEvent) -> Option<Instant> {
+    match event {
+        // about:blank isn't the site.
+        _ if url.scheme() == "about" => before,
+        // A redirect starts the wait over.
+        PageLoadEvent::Started => None,
+        PageLoadEvent::Finished => Some(Instant::now()),
+    }
+}
+
+/// The page has loaded and still set no session, so it never will.
+fn refused(loaded: Option<Instant>) -> bool {
+    loaded.is_some_and(|at| at.elapsed() >= RENEW_GRACE)
+}
+
 /// Gets a new session without showing anything. None means the website wants
 /// a real sign-in.
 pub async fn renew(handle: &AppHandle, rejected: &str) -> Option<Token> {
@@ -115,14 +137,24 @@ pub async fn renew(handle: &AppHandle, rejected: &str) -> Option<Token> {
         }
     }
     let page = WebviewUrl::External(page_url(RENEW_URL, "SOUND95_RENEW_URL"));
+    // A refusal is a page that loads without a session. Waiting out the whole
+    // timeout for it held up every request, and the login prompt with them.
+    let loaded = Arc::new(Mutex::new(None));
+    let mark = loaded.clone();
     let window = WebviewWindowBuilder::new(handle, RENEW_WINDOW, page)
         .initialization_script(NO_PLAYBACK)
         .visible(false)
+        .on_page_load(move |_, payload| {
+            if let Ok(mut at) = mark.lock() {
+                *at = last_load(*at, payload.url(), payload.event());
+            }
+        })
         .build()
         .ok()?;
+    let loaded_at = || loaded.lock().ok().and_then(|at| *at);
     let started = Instant::now();
     let mut access = None;
-    while access.is_none() && started.elapsed() < RENEW_TIMEOUT {
+    while access.is_none() && started.elapsed() < RENEW_TIMEOUT && !refused(loaded_at()) {
         tokio::time::sleep(POLL).await;
         handle.get_webview_window(RENEW_WINDOW)?;
         access = session(&window).filter(|s| s != rejected);
@@ -222,5 +254,20 @@ mod tests {
         assert!(refused("http://soundcloud.com/xight/hello"));
         assert!(refused("https://soundcloud.com.evil.example/xight"));
         assert!(refused("javascript:alert(1)"));
+    }
+
+    #[test]
+    fn a_loaded_page_without_a_session_is_a_refusal() {
+        use PageLoadEvent::{Finished, Started};
+        let site = Url::parse("https://soundcloud.com/").unwrap();
+        let blank = Url::parse("about:blank").unwrap();
+        let long_ago = Instant::now().checked_sub(RENEW_GRACE).unwrap();
+        assert!(!refused(None));
+        assert!(!refused(last_load(None, &site, Finished)));
+        assert!(refused(Some(long_ago)));
+        // A redirect starts the wait over, and about:blank doesn't count.
+        assert_eq!(last_load(Some(long_ago), &site, Started), None);
+        assert_eq!(last_load(Some(long_ago), &blank, Started), Some(long_ago));
+        assert_eq!(last_load(None, &blank, Finished), None);
     }
 }
