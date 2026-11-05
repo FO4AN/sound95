@@ -60,7 +60,28 @@ window.addEventListener('blur', () => $('titlebar').classList.add('idle'));
 
 /* ---------- Session actions ---------- */
 
+/**
+ * Sound95 can hold a session it couldn't check, when it started offline. Signing in
+ * again would clear the cookie that renews it, so Log In tries that session first and
+ * keeps it while SoundCloud can't be reached.
+ */
+async function retryHeldSession() {
+  if (!(await api.status().catch(() => null))?.logged_on) return false;
+  setStatus(tr('Loading...'), { sticky: true });
+  try {
+    await loadSession();
+    setStatus(tr('Ready'));
+    refresh();
+    return true;
+  } catch (e) {
+    if (!['network', 'server', 'rate_limited'].includes(e?.code)) return false;
+    setStatus(errorText(e), { sticky: true });
+    return true;
+  }
+}
+
 async function logOn() {
+  if (await retryHeldSession()) return;
   const result = await logonDialog();
   if (result !== 'logged-on') return;
   try {
@@ -535,10 +556,11 @@ const RECONNECT_MS = 10_000;
 function reconnect(reason) {
   setStatus(errorText(reason), { sticky: true });
   setTimeout(async () => {
+    if (session.user) return; // Log In found the session working again
     try {
       await loadSession();
       setStatus(tr('Ready'));
-      go({ name: 'home' });
+      refresh();
     } catch (e) {
       if (e?.code === 'session_expired') await logOn();
       else reconnect(e);
