@@ -2,8 +2,8 @@
 
 import { tr } from './i18n.js';
 import {
-  api, bigArt, idOf, normalizeFeedItem, normalizePlaylist, normalizeTrack, normalizeUser, page, paths, smallArt,
-  trackDetails,
+  api, bigArt, idOf, normalizeFeedItem, normalizePlaylist, normalizeTrack, normalizeUser, page, paths, playlistPages,
+  smallArt, trackDetails,
 } from './api.js';
 import { clear, el, errorText, fmtCount, fmtTime, setStatus, whileShown } from './dom.js';
 import { icon } from './icons.js';
@@ -402,10 +402,9 @@ async function followingView() {
 }
 
 async function playlistView(route) {
-  const [raw, view] = await Promise.all([
-    api.get(paths.playlist(route.urn)),
-    pagedTrackView(paths.playlistTracks(route.urn)),
-  ]);
+  const raw = await api.get(paths.playlist(route.urn));
+  const load = playlistPages(raw);
+  const view = trackList(await load(0), load);
   const p = normalizePlaylist(raw);
   const meta = [p.owner, p.count != null ? tr('{count} tracks', { count: p.count }) : null, p.duration ? fmtTime(p.duration) : null]
     .filter(Boolean).join(' - ');

@@ -7,7 +7,6 @@ import { tr } from './i18n.js';
 const invoke = (...args) => window.__TAURI__.core.invoke(...args);
 const PAGE = 50;
 const MAX_IDS = 5000;
-const PLAYLIST_TRACKS = 'playlist-tracks:';
 const ACCESS = { BLOCK: 'blocked', SNIP: 'preview' };
 
 let me = null;
@@ -127,24 +126,28 @@ export function smallArt(src) {
   return src ? src.replace('-large.', '-small.') : '';
 }
 
-/** api-v2 only fills in a playlist's first few tracks, so the rest come by ID. */
-async function playlistPage(target) {
-  const [id, from] = target.slice(PLAYLIST_TRACKS.length).split(':');
-  const start = Number(from);
-  const end = start + PAGE;
-  const ids = (await api.get(paths.playlist(id))).tracks.map((t) => t.id);
-  const wanted = ids.slice(start, end);
-  const tracks = wanted.length ? await api.get(url('/tracks', { ids: wanted.join(',') })) : [];
-  const byId = new Map(tracks.map((t) => [t.id, t]));
-  return {
-    collection: wanted.map((i) => byId.get(i)).filter(Boolean),
-    next_href: end < ids.length ? `${PLAYLIST_TRACKS}${id}:${end}` : null,
+/**
+ * Loads a playlist's tracks a page at a time. api-v2 only fills in a playlist's first
+ * few tracks, so the rest come by ID. The IDs come from the playlist already fetched,
+ * so paging doesn't fetch it again, and the pages can't shift if it changes meanwhile.
+ */
+export function playlistPages(raw) {
+  const ids = (raw?.tracks || []).map((t) => t.id);
+  return async (start = 0) => {
+    const end = Number(start) + PAGE;
+    const wanted = ids.slice(Number(start), end);
+    const tracks = wanted.length ? await api.get(url('/tracks', { ids: wanted.join(',') })) : [];
+    const byId = new Map(tracks.map((t) => [t.id, t]));
+    return {
+      items: wanted.map((i) => byId.get(i)).filter(Boolean).map(normalizeTrack).filter(Boolean),
+      next: end < ids.length ? end : null, // never 0, so it reads as "more to load"
+    };
   };
 }
 
 /** Page of a linked-partitioning collection, normalised. */
 export async function page(target, normalize) {
-  const data = target.startsWith(PLAYLIST_TRACKS) ? await playlistPage(target) : await api.get(target);
+  const data = await api.get(target);
   const items = Array.isArray(data) ? data : data?.collection || [];
   return { items: items.map(normalize).filter(Boolean), next: data?.next_href || null };
 }
@@ -166,7 +169,6 @@ export const paths = {
   searchPlaylists: (q) => paged('/search/playlists', { q }),
   searchUsers: (q) => paged('/search/users', { q }),
   playlist: (urn) => `/playlists/${idOf(urn)}`,
-  playlistTracks: (urn) => `${PLAYLIST_TRACKS}${idOf(urn)}:0`,
   user: (urn) => `/users/${idOf(urn)}`,
   userTracks: (urn) => paged(`/users/${idOf(urn)}/tracks`),
   userPlaylists: (urn) => paged(`/users/${idOf(urn)}/playlists_without_albums`),
