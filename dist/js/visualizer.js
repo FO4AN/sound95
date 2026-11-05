@@ -22,7 +22,10 @@ const DRAW_EVERY_MS = 30; // the audio arrives at 30 frames a second, so 60 woul
 const NO_AUDIO_AFTER_MS = 3000;
 const MODE_KEY = 'sound95.visual';
 const FOLLOW_KEY = 'sound95.vizFollow';
-const LOUDEST_KEY = 'sound95.loudest';
+const LOUDEST_KEY = 'sound95.loudestDb';
+// Earlier versions saved this up to 60 dB too high after a mute or a lower volume,
+// which would keep every visualizer flat for minutes, so that value isn't read back.
+const OLD_LOUDEST_KEY = 'sound95.loudest';
 // The backend shows this many dB below its reference, so a dB is this much of the height.
 const RANGE_DB = 54;
 // How fast the memory of the loudest music fades, in dB a frame: about 7 dB a minute,
@@ -52,7 +55,12 @@ const audio = {
 const arriving = [];
 
 let follows = (() => { try { return localStorage.getItem(FOLLOW_KEY) !== '0'; } catch { return true; } })();
-let loudest = (() => { try { return Number(localStorage.getItem(LOUDEST_KEY)) || -Infinity; } catch { return -Infinity; } })();
+let loudest = (() => {
+  try {
+    localStorage.removeItem(OLD_LOUDEST_KEY);
+    return Number(localStorage.getItem(LOUDEST_KEY)) || -Infinity;
+  } catch { return -Infinity; }
+})();
 
 export const followsVolume = () => follows;
 export function setFollowsVolume(on) {
