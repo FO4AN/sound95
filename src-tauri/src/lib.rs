@@ -307,12 +307,40 @@ fn relaunch(handle: tauri::AppHandle) {
     handle.restart();
 }
 
+/// Where an AppImage keeps its GStreamer registry, unless the user chose. Its
+/// plug-ins sit at a new mount point every launch, so GStreamer scans them all
+/// again each time, and by default saves the result over the registry that
+/// every other GStreamer program shares, which they then have to rebuild.
+#[cfg(target_os = "linux")]
+fn appimage_registry(
+    var: impl Fn(&str) -> Option<std::ffi::OsString>,
+) -> Option<std::path::PathBuf> {
+    use std::path::PathBuf;
+    var("APPIMAGE")?;
+    if var("GST_REGISTRY_1_0").is_some() || var("GST_REGISTRY").is_some() {
+        return None;
+    }
+    let cache = var("XDG_CACHE_HOME")
+        .map(PathBuf::from)
+        .filter(|dir| dir.is_absolute())
+        .or_else(|| var("HOME").map(|home| PathBuf::from(home).join(".cache")))?;
+    Some(
+        cache
+            .join("com.fo4an.sound95")
+            .join("gstreamer-registry.bin"),
+    )
+}
+
 pub fn run() {
     // WebKitGTK ranks its HLS demuxers out unless this is set, and SoundCloud
     // serves tracks as HLS. Must happen before the webview starts.
     #[cfg(target_os = "linux")]
     if std::env::var_os("WEBKIT_GST_ENABLE_HLS_SUPPORT").is_none() {
         std::env::set_var("WEBKIT_GST_ENABLE_HLS_SUPPORT", "1");
+    }
+    #[cfg(target_os = "linux")]
+    if let Some(registry) = appimage_registry(|name| std::env::var_os(name)) {
+        std::env::set_var("GST_REGISTRY_1_0", registry);
     }
 
     let builder = tauri::Builder::default();
@@ -440,6 +468,34 @@ mod tests {
         assert!(app.client.snapshot().await.user.is_none());
         assert!(store::Store::load(&dir.join("session.json")).user.is_none());
         std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn an_appimage_keeps_its_gstreamer_registry_apart() {
+        let env = |vars: &'static [(&str, &str)]| {
+            move |name: &str| {
+                vars.iter()
+                    .find(|(key, _)| *key == name)
+                    .map(|(_, value)| value.into())
+            }
+        };
+        let ours = std::path::Path::new("/home/a/.cache/com.fo4an.sound95/gstreamer-registry.bin");
+        let appimage = env(&[("APPIMAGE", "/x/Sound95.AppImage"), ("HOME", "/home/a")]);
+        assert_eq!(appimage_registry(appimage).as_deref(), Some(ours));
+        let cache = env(&[("APPIMAGE", "/x"), ("XDG_CACHE_HOME", "/home/a/.cache")]);
+        assert_eq!(appimage_registry(cache).as_deref(), Some(ours));
+        // A relative XDG_CACHE_HOME is to be ignored.
+        let relative = env(&[
+            ("APPIMAGE", "/x"),
+            ("XDG_CACHE_HOME", "c"),
+            ("HOME", "/home/a"),
+        ]);
+        assert_eq!(appimage_registry(relative).as_deref(), Some(ours));
+        // Installed from the .deb, and when the user picked a registry, it's left alone.
+        assert_eq!(appimage_registry(env(&[("HOME", "/home/a")])), None);
+        let chosen = env(&[("APPIMAGE", "/x"), ("HOME", "/h"), ("GST_REGISTRY", "/r")]);
+        assert_eq!(appimage_registry(chosen), None);
     }
 
     #[tokio::test]
