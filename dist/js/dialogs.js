@@ -76,7 +76,9 @@ export function logonDialog() {
     const body = el('div', { class: 'dialog-row' });
     const footer = [];
 
+    let attempt = 0;
     const start = async () => {
+      const mine = ++attempt;
       clear(body,
         el('span', { class: 'dialog-icon' }, icon('keys')),
         el('div', { style: 'display:grid;gap:10px' },
@@ -88,9 +90,11 @@ export function logonDialog() {
         await api.login();
         close('logged-on');
       } catch (e) {
+        // Cancel here already went back to the start, or a newer try owns the dialog.
+        if (mine !== attempt || !waiting) return;
         waiting = false;
-        if (e?.code === 'login_cancelled') return;
-        idle(errorText(e));
+        // Closing the sign-in window is a cancel too, so it needs no note.
+        idle(e?.code === 'login_cancelled' ? undefined : errorText(e));
       }
     };
 
