@@ -67,7 +67,9 @@ built into the app is refused.
 - **Discord.** Settings can show what you're listening to on your Discord profile. It's off until
   you turn it on.
 - **Tray.** Closing the window keeps the music playing. Right click the tray icon to pause, skip
-  or go back, and use Quit or File > Exit to really leave. Settings can turn this off.
+  or go back, and use Quit or File > Exit to really leave. Settings can turn this off. On a
+  Linux desktop that shows no tray icons, such as GNOME without the AppIndicator extension,
+  closing the window quits instead.
 
 ## Build
 
@@ -122,10 +124,11 @@ creeps up, and `tools/install-linux.sh` checks for it too.
 - `src-tauri/src/visual.rs`: turns the app's own audio into frequency bands, because the
   page can't read SoundCloud's player. `capture_linux.rs` taps this app's streams through
   PipeWire (`pw-record`) and reads the output device's delay, about 300 ms on Bluetooth, so
-  words and bars match what you hear. `capture_windows.rs` uses WASAPI process loopback,
-  which needs Windows 10 2004 or later. Neither opens a microphone, though a desktop that
-  flags any audio capture may show a recording icon. Without either, the visualizer follows
-  the track's published loudness and says so in its status bar.
+  the bars match what you hear. Karaoke's words need no such correction, because the
+  player's position already is the sound at your ears. `capture_windows.rs` uses WASAPI
+  process loopback, which needs Windows 10 2004 or later. Neither opens a microphone,
+  though a desktop that flags any audio capture may show a recording icon. Without either,
+  the visualizer follows the track's published loudness and says so in its status bar.
 - `src-tauri/src/update.rs`, `dist/js/updates.js`: the update check, notice and installer.
 - `dist/js/player.js`: plays through SoundCloud's official
   [Widget](https://developers.soundcloud.com/docs/api/html5-widget), so listeners stream
