@@ -68,6 +68,7 @@ export function refusal(file) {
 const layer = () => document.getElementById('backdrop');
 let current = null; // { file, kind, url }
 let stopMotion = null;
+let renders = 0; // a newer render() replaces one still reading its file
 
 function media(kind, url) {
   if (kind === 'video') {
@@ -138,6 +139,7 @@ function startMotion(node, gif) {
 }
 
 async function render() {
+  const mine = ++renders;
   stopMotion?.();
   stopMotion = null;
   const root = document.documentElement;
@@ -156,6 +158,8 @@ async function render() {
     } catch {
       gif = null; // Not one we can read, but the browser may still show it.
     }
+    // A newer render took over while this one read the file.
+    if (mine !== renders) return;
   }
   node ||= media(current.kind, current.url);
   node.addEventListener('error', () => setStatus(tr('Sound95 can\'t show that kind of file.')));
