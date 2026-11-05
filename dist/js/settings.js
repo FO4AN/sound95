@@ -147,11 +147,16 @@ export async function settingsDialog() {
       if (pickedUrl) URL.revokeObjectURL(pickedUrl);
       close(value);
     };
+    // The dialog stays up while the background is saved and set up, which takes a
+    // while for a big GIF, and a second OK then would set it up twice over.
+    let saving = false;
     return {
       body: el('div', { class: 'settings-tabs' }, tabBar, panel),
       onDismiss: () => finish(),
       buttons: [
         el('button', { class: 'default', onClick: async () => {
+            if (saving) return;
+            saving = true;
             applyMotion({ on: motion.checked, speed: speed.value });
             crossfade(() => applyTheme(theme));
             setFollowsVolume(follow.checked);
