@@ -6,7 +6,7 @@ import { tr } from './i18n.js';
 import { api } from './api.js';
 import { clear, el, errorText, fmtTime } from './dom.js';
 import { dialog } from './dialogs.js';
-import { durationMs, livePositionMs, onPlayerChange, player, seekToMs } from './player.js';
+import { durationMs, livePositionMs, onPlayerChange, player, seekToMs, steadyPositionMs } from './player.js';
 import { attachVisual, outputDelayMs } from './visualizer.js';
 import { floatWindow } from './windows.js';
 
@@ -17,6 +17,7 @@ const SIZES = { Small: 22, Medium: 33, Large: 44 };
 const REST_MS = 4000; // a gap this long gets a break screen
 const COUNT_IN_MS = 3000;
 const LINE_TAIL_MS = 300;
+const LAST_WORD_MS = 400; // a last word with no end of its own fills at least this long
 const RETRY_MS = 3000; // lyrics sites often fail once and then answer
 const INTRO_SHARE = 0.06; // guessed timing: where the singing starts and how long it runs
 const SINGING_SHARE = 0.9;
@@ -55,15 +56,49 @@ function save(urn, changes) {
 
 /* ---------- Timing ---------- */
 
+// Han, kana and hangul run without spaces, about a syllable a character.
+const CJK = '\\p{Script=Han}\\p{Script=Hiragana}\\p{Script=Katakana}\\p{Script=Hangul}';
+const CJK_CHARS = new RegExp(`[${CJK}]`, 'gu');
+const PIECES = new RegExp(`[${CJK}]\\s*|[^\\s${CJK}]+\\s*`, 'gu');
+const CJK_WEIGHT = 2; // letters' worth of singing in one character
+
+/** Rough singing time for a line that has no end time of its own. */
+function singMs(text) {
+  const syllables = (text.match(CJK_CHARS) || []).length;
+  const words = text.replace(CJK_CHARS, ' ').split(/\s+/).filter((w) => /[\p{L}\p{N}]/u.test(w)).length;
+  return 600 + 420 * words + 300 * syllables;
+}
+
+/** Shares a line's time out over its words, or its characters where they run together. */
 function spreadWords(text, start, end) {
-  const pieces = text.match(/\S+\s*/g) || [];
-  const total = pieces.reduce((sum, p) => sum + p.trim().length, 0) || 1;
+  const pieces = text.match(PIECES) || [];
+  const weight = (piece) => {
+    const core = piece.trim();
+    return core.match(CJK_CHARS) ? CJK_WEIGHT : core.length;
+  };
+  const total = pieces.reduce((sum, p) => sum + weight(p), 0) || 1;
   let at = start;
   return pieces.map((piece) => {
-    const dur = ((end - start) * piece.trim().length) / total;
+    const dur = ((end - start) * weight(piece)) / total;
     const word = { ms: at, dur, text: piece };
     at += dur;
     return word;
+  });
+}
+
+/**
+ * Gives each word an end, and splits off its spaces: they stay outside the wipe, so the
+ * letters fill over exactly the word's time. A word with no length runs to the next one,
+ * or to the end of the line.
+ */
+function timeWords(words, end) {
+  return words.map((word, k) => {
+    const following = words[k + 1]?.ms;
+    const stop = word.dur > 0 ? word.ms + word.dur
+      : following > word.ms ? following
+        : Math.max(end, word.ms + LAST_WORD_MS);
+    const [, lead, core, tail] = /^(\s*)([\s\S]*?)(\s*)$/.exec(word.text);
+    return { ms: word.ms, end: stop, lead, core, tail };
   });
 }
 
@@ -81,21 +116,21 @@ function guessTimes(lines, total) {
 
 /** Turns lyrics into cues: spoken lines with word timing and an end time. */
 function toCues(lyrics, total) {
-  const lines = lyrics.synced ? lyrics.lines : guessTimes(lyrics.lines, total);
+  // Pasted and tapped lines can be out of order, and finding the line needs them sorted.
+  const lines = lyrics.synced ? [...lyrics.lines].sort((a, b) => a.ms - b.ms) : guessTimes(lyrics.lines, total);
   const cues = [];
   lines.forEach((line, i) => {
     if (!line.text) return;
-    const next = lines[i + 1]?.ms ?? line.ms + 5000;
+    const after = lines[i + 1];
+    const next = after?.ms ?? line.ms + 5000;
     const gap = Math.max(300, next - line.ms);
-    const wordCount = line.text.split(/\s+/).length;
-    // Singers finish before the next line starts, so don't drag the wipe out to it.
-    const end = line.ms + (line.dur || Math.min(gap * 0.92, 600 + 420 * wordCount));
-    cues.push({
-      ms: line.ms,
-      end,
-      text: line.text,
-      words: line.words?.length ? line.words : spreadWords(line.text, line.ms, end),
-    });
+    // A blank line marks where the singing stops. Otherwise singers finish before the
+    // next line starts, so don't drag the wipe out to it.
+    const guess = after && !after.text ? gap : Math.min(gap * 0.92, singMs(line.text));
+    let end = line.ms + (line.dur || guess);
+    const words = timeWords(line.words?.length ? line.words : spreadWords(line.text, line.ms, end), end);
+    end = Math.max(end, words[words.length - 1]?.end ?? end);
+    cues.push({ ms: line.ms, end, text: line.text, words });
   });
   return cues;
 }
@@ -111,18 +146,59 @@ function lastCueBefore(cues, t) {
   return found;
 }
 
-/** `[mm:ss.xx]` lines if the pasted text has them, plain lines if not. */
+const STAMP = /^\[(\d+):(\d+(?:[.:]\d+)?)\]/;
+const WORD_STAMP = /<(\d+):(\d+(?:[.:]\d+)?)>/;
+const stampMs = (minutes, seconds) => Math.round(Number(minutes) * 60000 + Number(seconds.replace(':', '.')) * 1000);
+
+/** `<mm:ss.xx>word <mm:ss.xx>word`, or null if the text has no word stamps. */
+function wordStamps(text, start) {
+  if (!WORD_STAMP.test(text)) return null;
+  const parts = text.split(new RegExp(WORD_STAMP.source));
+  const words = parts[0] ? [{ ms: start, dur: 0, text: parts[0] }] : [];
+  for (let k = 1; k < parts.length; k += 3) words.push({ ms: stampMs(parts[k], parts[k + 1]), dur: 0, text: parts[k + 2] });
+  return words;
+}
+
+/** Drops leading blank lines and runs of them, as the lyrics sites' lines come. */
+function tidyLines(lines) {
+  return lines.filter((line, i) => line.text || (i > 0 && lines[i - 1].text));
+}
+
+/**
+ * Pasted lyrics, read the way lyrics.rs reads LRC from the sites: several stamps on a
+ * repeated line, mm:ss:xx stamps, [offset:], word stamps, and tags that aren't lines.
+ * Plain lines if the text isn't timed.
+ */
 function parsePasted(text) {
-  const stamped = /^\[(\d+):(\d+(?:\.\d+)?)\]\s*(.*)$/;
   const rows = text.split('\n').map((l) => l.trim());
-  const timed = rows.map((l) => stamped.exec(l)).filter(Boolean);
-  if (timed.length >= 3) {
-    return {
-      synced: true,
-      lines: timed.map(([, m, s, t]) => ({ ms: Number(m) * 60000 + Number(s) * 1000, dur: 0, text: t, words: [] })),
-    };
+  const offset = Number(/^\[offset:\s*\+?(-?\d+)\s*\]$/i.exec(rows.find((r) => /^\[offset:/i.test(r)) || '')?.[1] || 0);
+  const shift = (ms) => Math.max(0, ms - offset);
+  const timed = [];
+  for (const row of rows) {
+    let rest = row;
+    const stamps = [];
+    for (let m = STAMP.exec(rest); m; m = STAMP.exec(rest)) {
+      stamps.push(stampMs(m[1], m[2]));
+      rest = rest.slice(m[0].length);
+    }
+    rest = rest.trim();
+    // Word stamps are written for the line's first time; a repeat moves them along.
+    const first = Math.min(...stamps);
+    const words = wordStamps(rest, first);
+    const line = words ? words.map((w) => w.text).join('').trim() : rest;
+    for (const ms of stamps) {
+      const moved = (words || []).map((w) => ({ ...w, ms: shift(w.ms + ms - first) }));
+      timed.push({ ms: shift(ms), dur: 0, text: line, words: moved });
+    }
   }
-  return { synced: false, lines: rows.map((t) => ({ ms: 0, dur: 0, text: t, words: [] })) };
+  timed.sort((a, b) => a.ms - b.ms);
+  if (timed.filter((l) => l.text).length >= 3 && timed.some((l) => l.ms > 0)) {
+    return { synced: true, byWord: timed.some((l) => l.words.length), lines: tidyLines(timed) };
+  }
+  // "[Chorus]" and the like aren't sung.
+  const plain = tidyLines(rows.filter((r) => !/^\[.*\]$/.test(r)).map((t) => ({ ms: 0, dur: 0, text: t, words: [] })));
+  while (plain.length && !plain[plain.length - 1].text) plain.pop();
+  return { synced: false, lines: plain };
 }
 
 /* ---------- The window ---------- */
@@ -135,7 +211,7 @@ const state = {
   cues: [],
   offset: 0,
   shownDelay: 0,
-  rowsKey: '',
+  rowsKey: -1,
   activeWords: [],
   tap: null,
   raf: 0,
@@ -163,12 +239,13 @@ function describe() {
   if (lyrics.speedAdjusted) parts.push(tr('adjusted to this speed'));
   else if (lyrics.synced && Math.abs(lyrics.offBy) > 4) parts.push(tr(lyrics.offBy > 0 ? 'from a version {seconds}s longer' : 'from a version {seconds}s shorter', { seconds: Math.abs(lyrics.offBy) }));
   if (offset) parts.push(`${offset > 0 ? '+' : ''}${(offset / 1000).toFixed(2)}s`);
+  // The player's clock already counts the delay; the strip's bars wait for it.
   if (outputDelayMs() >= 30) parts.push(tr('{ms} ms speaker delay fixed', { ms: outputDelayMs() }));
   win.setStatus(parts.join(' - '));
 }
 
 function showNotice(text, ...buttons) {
-  state.rowsKey = '';
+  state.rowsKey = -1;
   state.cues = [];
   state.lyrics = null;
   clear(linesBox, el('div', { class: 'k-notice' }, el('div', {}, text), buttons.length ? el('div', { class: 'k-buttons' }, buttons) : null));
@@ -178,8 +255,14 @@ function showNotice(text, ...buttons) {
 function use(lyrics) {
   state.lyrics = lyrics;
   state.cues = toCues(lyrics, state.track?.fullDuration || durationMs());
-  state.rowsKey = '';
+  state.rowsKey = -1;
   describe();
+}
+
+/** Looks up the next track's lyrics while this one plays, so they're there from its start. */
+function prefetchNext() {
+  const next = player.queue[player.index + 1];
+  if (state.win && next && next.access !== 'blocked') lyricsFor(next).catch(() => { /* it tries again when it plays */ });
 }
 
 const findButton = () => el('button', { onClick: findDialog }, tr('Find Lyrics...'));
@@ -197,6 +280,7 @@ async function load(track, retried = false) {
   state.offset = remembered.offset || 0;
   if (remembered.custom) {
     use(remembered.custom);
+    prefetchNext();
     return;
   }
   clear(linesBox, el('div', { class: 'k-notice' }, el('div', {}, tr('Searching for lyrics...')), el('div', { class: 'marquee sunken' })));
@@ -212,28 +296,30 @@ async function load(track, retried = false) {
       setTimeout(() => { if (token === state.token) load(track, true); }, RETRY_MS);
       return;
     }
-    showNotice(errorText(e), el('button', { onClick: () => load(track) }, tr('Retry')), pasteButton());
+    showNotice(errorText(e), el('button', { onClick: () => load(track) }, tr('Retry')), findButton(), pasteButton());
   }
+  prefetchNext();
 }
 
 function setRows(rows) {
   state.activeWords = [];
   clear(linesBox, rows.map(({ cue, role }) => {
     if (cue.marker) return el('div', { class: `k-line ${role} k-marker` }, cue.marker);
-    const spans = cue.words.map((word) => {
-      const span = el('span', { class: 'k-word' }, word.text);
+    const words = cue.words.map((word) => {
+      const span = el('span', { class: 'k-word' }, word.core);
       if (role === 'current') state.activeWords.push({ span, word, fill: 0 });
-      return span;
+      return [word.lead || null, span, word.tail || null];
     });
-    return el('div', { class: `k-line ${role}`, title: fmtTime(cue.ms), onClick: () => seekToMs(cue.ms + state.offset) }, spans);
+    return el('div', { class: `k-line ${role}`, title: fmtTime(cue.ms), onClick: () => seekToMs(cue.ms + state.offset) }, words);
   }));
 }
 
+/** One style write per frame at most: only the word being sung changes. */
 function paintWords(t) {
   for (const entry of state.activeWords) {
     const { word } = entry;
-    const share = word.dur > 0 ? (t - word.ms) / word.dur : Number(t >= word.ms);
-    const fill = Math.min(100, Math.max(0, share * 100));
+    const share = (t - word.ms) / (word.end - word.ms);
+    const fill = Math.round(Math.min(1, Math.max(0, share)) * 1000) / 10;
     if (fill !== entry.fill) {
       entry.fill = fill;
       entry.span.style.setProperty('--fill', `${fill}%`);
@@ -251,7 +337,7 @@ function renderCues(t) {
   const resting = index < 0 || (t > cue.end + LINE_TAIL_MS && quietUntilNext);
   const left = upcoming ? upcoming.ms - t : 0;
   const count = resting && left <= COUNT_IN_MS ? Math.ceil(left / 1000) : 0;
-  const key = `${index}:${resting}:${count}`;
+  const key = (index + 1) * 16 + (resting ? 8 : 0) + count;
   if (key !== state.rowsKey) {
     state.rowsKey = key;
     const later = cues.slice(index + 1, index + 3);
@@ -273,16 +359,20 @@ function renderCues(t) {
   if (!resting) paintWords(t);
 }
 
-/** Where the song is at your ears, which is what the words have to match. */
-const heardMs = () => livePositionMs() - outputDelayMs();
+const frame = { ms: 1000 / 60, last: 0 };
 
-function loop() {
+function loop(ts = performance.now()) {
   if (!state.win) return;
+  // What's drawn now shows about a frame later, so the words aim for then. The player's
+  // position is the sound at your ears already: on Linux WebKit asks the sound server,
+  // which counts the speaker's delay, Bluetooth's included, so nothing comes off it here.
+  if (frame.last && ts > frame.last) frame.ms += (Math.min(40, Math.max(6, ts - frame.last)) - frame.ms) * 0.1;
+  frame.last = ts;
   if (state.shownDelay !== outputDelayMs()) {
     state.shownDelay = outputDelayMs();
     describe();
   }
-  if (!state.tap) renderCues(heardMs() - state.offset);
+  if (!state.tap && state.cues.length) renderCues(steadyPositionMs(ts + frame.ms) - state.offset);
   state.raf = requestAnimationFrame(loop);
 }
 
@@ -296,7 +386,7 @@ function nudge(delta) {
 
 function stopTapping() {
   state.tap = null;
-  state.rowsKey = '';
+  state.rowsKey = -1;
   clear(linesBox);
 }
 
@@ -313,10 +403,14 @@ function showTapLine() {
         el('button', { onClick: stopTapping }, tr('Cancel')))));
 }
 
-function tap() {
+function tap(e) {
   const session = state.tap;
-  if (!session) return;
-  session.lines[session.index].ms = Math.round(heardMs());
+  // Holding Space down repeats it, which isn't a line starting.
+  if (!session || e?.repeat) return;
+  // The press is the moment to time, not whenever this got to run.
+  const now = performance.now();
+  const at = e?.timeStamp > now - 1000 && e.timeStamp <= now ? e.timeStamp : now;
+  session.lines[session.index].ms = Math.round(livePositionMs(at));
   session.index += 1;
   if (session.index < session.lines.length) { showTapLine(); return; }
   const custom = { source: 'You', custom: true, synced: true, byWord: false, offBy: 0, lines: session.lines.map((l) => ({ ...l, dur: 0, words: [] })) };
@@ -337,7 +431,7 @@ function startTapping() {
 function onKey(e) {
   if (['INPUT', 'TEXTAREA'].includes(e.target.tagName) || document.querySelector('.scrim')) return;
   if (state.tap) {
-    if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); e.stopPropagation(); tap(); }
+    if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); e.stopPropagation(); tap(e); }
     if (e.key === 'Escape') { e.stopPropagation(); stopTapping(); }
     return;
   }
@@ -367,12 +461,17 @@ async function findDialog() {
     const artist = el('input', { type: 'text', value: track.artist, spellcheck: false });
     const title = el('input', { type: 'text', value: track.title, spellcheck: false });
     const list = el('div', { class: 'pick-list sunken' });
+    // The search started on opening can answer after one you asked for since.
+    let latest = 0;
     const search = async (request) => {
+      const mine = ++latest;
       clear(list, el('div', { class: 'note', style: 'padding:4px' }, tr('Searching...')));
       try {
         const results = await api.lyrics(request);
+        if (mine !== latest) return;
         clear(list, results.length ? results.map((r) => resultRow(r, close)) : el('div', { class: 'note', style: 'padding:4px' }, tr('Nothing found. Try a shorter title.')));
       } catch (e) {
+        if (mine !== latest) return;
         clear(list, el('div', { class: 'note', style: 'padding:4px' }, errorText(e)));
       }
     };
@@ -389,10 +488,19 @@ async function findDialog() {
       buttons: [button, el('button', { onClick: () => close() }, tr('Cancel'))],
     };
   }, { width: 480 });
-  if (chosen) {
-    save(track.urn, { custom: null });
-    use(chosen);
-  }
+  if (chosen) keep(track, chosen);
+}
+
+/**
+ * Remembers lyrics you chose for a track, so they come back next time. An offset set
+ * for other lyrics doesn't fit them. The track may have changed while you chose.
+ */
+function keep(track, lyrics) {
+  save(track.urn, { custom: lyrics, offset: 0 });
+  if (state.track?.urn !== track.urn) return;
+  state.token += 1; // a search still running for this track mustn't replace them
+  state.offset = 0;
+  use(lyrics);
 }
 
 async function pasteDialog() {
@@ -409,9 +517,7 @@ async function pasteDialog() {
     };
   }, { width: 420 });
   if (!text?.trim()) return;
-  const custom = { source: 'You', custom: true, byWord: false, offBy: 0, ...parsePasted(text) };
-  save(track.urn, { custom });
-  use(custom);
+  keep(track, { source: 'You', custom: true, byWord: false, offBy: 0, ...parsePasted(text) });
 }
 
 const lyricsMenu = () => [
@@ -422,7 +528,7 @@ const lyricsMenu = () => [
   {
     label: tr('Forget My Lyrics'),
     disabled: !state.track || !saved(state.track.urn).custom,
-    action: () => { save(state.track.urn, { custom: null }); load(state.track); },
+    action: () => { save(state.track.urn, { custom: null, offset: 0 }); load(state.track); },
   },
 ];
 
@@ -473,6 +579,7 @@ export function toggleKaraoke() {
   bars = attachVisual(strip, { pixel: 2 });
   document.addEventListener('keydown', onKey, true);
   load(player.current);
+  frame.last = 0;
   loop();
   toggleListeners.forEach((fn) => fn());
 }
