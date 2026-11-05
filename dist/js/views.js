@@ -390,25 +390,34 @@ async function homeView(_route, alive) {
 
 const GENRES = ['Hip-hop & Rap', 'Electronic', 'House', 'Techno', 'Pop', 'R&B & Soul', 'Rock', 'Indie', 'Ambient', 'Drum & Bass', 'Dubstep', 'Trap', 'Lo-fi', 'Metal', 'Jazz & Blues', 'Latin', 'Classical', 'Soundtrack'];
 
-async function discoverView(_route, alive) {
+/**
+ * SoundCloud has no public recommendations feed, so this builds one from what the
+ * user recently played, or failing that, liked.
+ */
+async function becauseYouPlayed() {
+  const [recent, likes] = await Promise.allSettled([page(paths.recent(5), normalizeTrack), page(paths.likes(5), normalizeTrack)]);
+  const seeds = [recent, likes].flatMap((r) => (r.status === 'fulfilled' ? r.value.items : []));
+  const seed = seeds.find((t) => t.access !== 'blocked');
+  if (!seed) return null;
+  const related = await page(paths.related(seed.urn), normalizeTrack).catch(() => ({ items: [], next: null }));
+  if (!related.items.length) return null;
+  return [el('div', { class: 'shelf-title' }, tr('Because You Played "{title}"', { title: seed.title })),
+    trackList(related, (t) => page(t, normalizeTrack)).node];
+}
+
+async function discoverView() {
   if (!session.user) return logOnPrompt(tr('Log in to discover music.'), 'search');
   const root = el('div', { class: 'view' },
     el('h1', { class: 'greeting' }, tr('Discover')),
     el('div', { class: 'shelf-title' }, tr('Browse by Genre')),
     el('div', { class: 'genres' }, GENRES.map((genre) => el('button', { onClick: () => go({ name: 'genre', genre }) }, tr(genre)))));
-  // SoundCloud has no public recommendations feed, so this builds one from
-  // what the user recently played, or failing that, liked.
-  const [recent, likes] = await Promise.allSettled([page(paths.recent(), normalizeTrack), page(paths.likes(5), normalizeTrack)]);
-  if (!alive()) return root;
-  const seeds = [recent, likes].flatMap((r) => (r.status === 'fulfilled' ? r.value.items : []));
-  const seed = seeds.find((t) => t.access !== 'blocked');
-  if (seed) {
-    const related = await page(paths.related(seed.urn), normalizeTrack).catch(() => ({ items: [], next: null }));
-    if (related.items.length) {
-      root.append(el('div', { class: 'shelf-title' }, tr('Because You Played "{title}"', { title: seed.title })),
-        trackList(related, (t) => page(t, normalizeTrack)).node);
-    }
-  }
+  // The genres don't wait for the shelf, which takes two requests one after the other.
+  // It's added even to a page that was left, since Back can show that page again.
+  becauseYouPlayed().then((shelf) => {
+    if (!shelf) return;
+    root.append(...shelf);
+    if (root.isConnected) syncRows();
+  }, () => {});
   return root;
 }
 
