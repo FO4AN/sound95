@@ -388,14 +388,16 @@ function load(track, start = null) {
 
 /** Plays `tracks` from `index`, and from `start` ms into that track if given. */
 export function playList(tracks, index, start = null) {
-  const queue = tracks.filter((t) => t.access !== 'blocked');
+  const playable = (t) => t.access !== 'blocked';
+  const queue = tracks.filter(playable);
   const wanted = tracks[index];
   if (!queue.length) {
     setStatus(tr('Could not play "{title}".', { title: wanted?.title ?? '' }));
     return;
   }
   player.queue = queue;
-  player.index = Math.max(0, queue.findIndex((t) => t.urn === wanted?.urn));
+  // By place, not by URN: a list can hold a track twice, and the copy clicked plays.
+  player.index = wanted && playable(wanted) ? tracks.slice(0, index).filter(playable).length : 0;
   if (player.shuffle) shuffleRest();
   skips = 0;
   load(player.current, player.current.urn === wanted?.urn ? start : null);
