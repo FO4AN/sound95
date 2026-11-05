@@ -279,18 +279,17 @@ kbd { font: inherit; }
    window that asks for more, which puts the pointer out of line with the page, so
    the layout fits any size instead of insisting on a minimum. */
 @media (max-width: 980px) {
-  .workspace { grid-template-columns: 160px minmax(0, 1fr) 190px; }
-  .workspace.no-queue { grid-template-columns: 160px minmax(0, 1fr); }
+  /* Up Next still floats over the main pane, so no column is kept for it. */
+  .workspace, .workspace.no-queue { grid-template-columns: 160px minmax(0, 1fr); }
   .playerbar { grid-template-columns: minmax(0, 1fr) minmax(190px, 1.4fr) auto; gap: 6px; }
   .mini-viz { display: none; }
   .np-right { gap: 3px; }
   .np-right input { width: 60px; }
 }
 @media (max-width: 760px) {
-  .workspace { grid-template-columns: 34px minmax(0, 1fr) 170px; }
-  .workspace.no-queue { grid-template-columns: 34px minmax(0, 1fr); }
+  .workspace, .workspace.no-queue { grid-template-columns: 34px minmax(0, 1fr); }
   .sidebar { padding: 2px; }
-  .tree-head, .tree-empty { display: none; }
+  .tree-head, .sidebar .tree-empty { display: none; }
   .tree-item { justify-content: center; height: 26px; margin: 0; padding: 0; border-left: 0; }
   .tree-item > span { display: none; }
   .tree-item.selected { background: var(--select); }
@@ -301,6 +300,8 @@ kbd { font: inherit; }
 @media (max-width: 560px) {
   .workspace { grid-template-columns: 34px minmax(0, 1fr); }
   .workspace:not(.no-queue) .content { display: none; }
+  /* With the page hidden, Up Next takes its place instead of floating at the side. */
+  .workspace:not(.no-queue) .queue { position: static; width: auto; }
   .address > span, .tool-sep { display: none; }
   .account { width: 30px; padding: 0 5px; }
   .account span { display: none; }
