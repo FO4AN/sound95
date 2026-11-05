@@ -66,8 +66,19 @@ function dropPages(routes = () => true) {
   for (const entry of kept) if (routes(entry.route)) drop(entry);
 }
 
-// Pages show the account, language and skin they were built with.
-onSessionChange(() => dropPages());
+// Pages show the account, language and skin they were built with. A like or a new
+// playlist changes only the pages that list them: hearts on the rest are marked
+// again by syncRows when they're shown.
+let account = null;
+onSessionChange(() => {
+  const now = session.user?.id ?? null;
+  if (now !== account) {
+    account = now;
+    dropPages();
+  } else {
+    dropPages((r) => r.name === 'home' || r.name === 'liked' || (r.name === 'user' && idOf(r.urn) === String(now)));
+  }
+});
 onLanguageChange(() => dropPages());
 onSkinChange(() => dropPages());
 
