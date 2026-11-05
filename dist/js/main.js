@@ -225,15 +225,30 @@ $('start-button').addEventListener('mousedown', (e) => { e.stopPropagation(); op
 
 /* ---------- Sidebar ---------- */
 
-function treeItem(iconName, label, route) {
+const treeRoutes = new WeakMap();
+
+function isShown(route) {
   const current = currentRoute();
-  const selected = current && route.name === current.name && route.urn === current.urn;
-  return el('div', {
-    class: `tree-item${selected ? ' selected' : ''}`,
+  return !!current && route.name === current.name && route.urn === current.urn;
+}
+
+function treeItem(iconName, label, route, open = () => go(route)) {
+  const node = el('div', {
+    class: `tree-item${isShown(route) ? ' selected' : ''}`,
     title: label,
-    onClick: () => go(route),
+    onClick: open,
     onContextmenu: (e) => e.preventDefault(),
   }, icon(iconName), el('span', {}, label));
+  treeRoutes.set(node, route);
+  return node;
+}
+
+/** Moves the highlight to the page shown. Building the tree again costs an icon per playlist. */
+function markSidebar() {
+  for (const node of $('sidebar').querySelectorAll('.tree-item')) {
+    const route = treeRoutes.get(node);
+    node.classList.toggle('selected', !!route && isShown(route));
+  }
 }
 
 function renderSidebar() {
@@ -241,7 +256,7 @@ function renderSidebar() {
     el('div', { class: 'tree-head' }, icon('note'), 'Sound95'),
     treeItem('home', tr('Home'), { name: 'home' }),
     treeItem('note', tr('Discover'), { name: 'discover' }),
-    treeItem('search', tr('Search'), { name: 'search', q: $('search-box').value.trim() }),
+    treeItem('search', tr('Search'), { name: 'search' }, () => go({ name: 'search', q: $('search-box').value.trim() })),
     el('div', { class: 'tree-head' }, icon('folder'), tr('My Library')),
     session.user ? [
       treeItem('heart-on', tr('Liked Tracks'), { name: 'liked' }),
@@ -426,7 +441,7 @@ onNavigate((route) => {
   $('nav-back').disabled = !canGoBack();
   $('nav-forward').disabled = !canGoForward();
   if (route.name === 'search') $('search-box').value = route.q || '';
-  renderSidebar();
+  markSidebar();
 });
 
 onSessionChange(() => {
