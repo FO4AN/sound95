@@ -2,7 +2,7 @@
 
 import { onLanguageChange, tr, translatePage } from './i18n.js';
 import { applyCloseToTray, applyTheme, settingsDialog } from './settings.js';
-import { api } from './api.js';
+import { api, setMe } from './api.js';
 import { clear, el, errorText, fmtTime, setStatus } from './dom.js';
 import { icon, setIcon } from './icons.js';
 import { checkForUpdates, watchForUpdates } from './updates.js';
@@ -74,11 +74,33 @@ async function logOn() {
 }
 window.addEventListener('sound95:logon', logOn);
 
+// A session that couldn't be renewed is gone: show that, and offer to log in again.
+let expiring = false;
+window.addEventListener('sound95:expired', async ({ detail }) => {
+  if (expiring) return;
+  expiring = true;
+  try {
+    const status = await loadSession().catch(() => null);
+    if (status?.logged_on) return;
+    refresh();
+    setStatus(errorText(detail), { sticky: true });
+    await logOn();
+  } finally {
+    expiring = false;
+  }
+});
+
 async function logOff() {
-  await api.logout();
-  await loadSession();
-  setStatus(tr('Logged off'));
-  go({ name: 'home' });
+  setMe(null); // a request that Log Off cuts short isn't a session expiring
+  try {
+    await api.logout();
+    setStatus(tr('Logged off'));
+  } catch (e) {
+    setStatus(errorText(e));
+  } finally {
+    await loadSession().catch(() => {});
+    go({ name: 'home' });
+  }
 }
 
 /* ---------- Menus ---------- */

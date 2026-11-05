@@ -4,13 +4,22 @@
 
 import { tr } from './i18n.js';
 
-const invoke = (...args) => window.__TAURI__.core.invoke(...args);
 const PAGE = 50;
 const MAX_IDS = 5000;
 const ACCESS = { BLOCK: 'blocked', SNIP: 'preview' };
 
 let me = null;
 export const setMe = (user) => { me = user?.id ?? null; };
+
+// When a session can't be renewed, the backend has already logged out. The page is
+// told once, so it stops showing you as logged in and can offer to log in again.
+const invoke = (...args) => window.__TAURI__.core.invoke(...args).catch((e) => {
+  if (me != null && e?.code === 'session_expired') {
+    me = null;
+    window.dispatchEvent(new CustomEvent('sound95:expired', { detail: e }));
+  }
+  throw e;
+});
 
 /** The numeric ID on the end of a URN, which is what api-v2 paths take. */
 export const idOf = (urn) => String(urn).split(':').pop();
