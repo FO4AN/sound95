@@ -211,6 +211,40 @@ function line(ctx, x0, y0, x1, y1) {
   }
 }
 
+/* A fillRect per pixel costs milliseconds on a big window, so modes made of single
+   pixels write them into an image and draw that once. */
+const packer = new Uint8ClampedArray(4);
+const packed = new Uint32Array(packer.buffer);
+
+/** A '#rrggbb' or 'rgb(r,g,b)' colour as one pixel of an image's Uint32Array. */
+function packColor(color) {
+  const rgb = color.startsWith('#') ? [1, 3, 5].map((i) => parseInt(color.slice(i, i + 2), 16)) : color.match(/\d+/g).map(Number);
+  packer.set([...rgb, 255]);
+  return packed[0];
+}
+
+const BLACK32 = packColor('#000000');
+const VGA32 = VGA.map(packColor);
+
+/** The surface's own image of this size, with one number per pixel. */
+function imageOf(memory, w, h) {
+  if (memory.image?.width !== w || memory.image.height !== h) {
+    memory.image = new ImageData(w, h);
+    memory.pixels = new Uint32Array(memory.image.data.buffer);
+  }
+  return memory.pixels;
+}
+
+/** line(), into an image. */
+function linePx(pixels, w, h, color, x0, y0, x1, y1) {
+  const steps = Math.max(Math.abs(x1 - x0), Math.abs(y1 - y0), 1) | 0;
+  for (let i = 0; i <= steps; i++) {
+    const x = Math.round(x0 + ((x1 - x0) * i) / steps);
+    const y = Math.round(y0 + ((y1 - y0) * i) / steps);
+    if (x >= 0 && x < w && y >= 0 && y < h) pixels[y * w + x] = color;
+  }
+}
+
 function drawBars(ctx, w, h) {
   clearTo(ctx, w, h);
   const columns = w >= BANDS * 4 ? BANDS : Math.floor(BANDS / 2);
@@ -263,7 +297,8 @@ const TRAIL = 7;
 
 function drawMystify(ctx, w, h, memory) {
   memory.shapes ||= [makeShape(1), makeShape(3)];
-  clearTo(ctx, w, h);
+  const pixels = imageOf(memory, w, h);
+  pixels.fill(BLACK32);
   const speed = 0.0016 + audio.level * 0.0075;
   const kick = bass();
   if (kick - (memory.lastBass || 0) > 0.14) {
@@ -279,14 +314,15 @@ function drawMystify(ctx, w, h, memory) {
     }
     shape.trail.push(shape.points.map((p) => [p.x * (w - 1), p.y * (h - 1)]));
     if (shape.trail.length > TRAIL) shape.trail.shift();
-    ctx.fillStyle = VGA[shape.colorIndex];
+    const color = VGA32[shape.colorIndex];
     for (const pts of shape.trail) {
       pts.forEach(([x, y], i) => {
         const [nx, ny] = pts[(i + 1) % pts.length];
-        line(ctx, x, y, nx, ny);
+        linePx(pixels, w, h, color, x, y, nx, ny);
       });
     }
   }
+  ctx.putImageData(memory.image, 0, 0);
 }
 
 function drawStars(ctx, w, h, memory) {
@@ -315,7 +351,9 @@ const HEAT = Array.from({ length: 48 }, (_, i) => {
   const channel = (from, span) => Math.round(255 * Math.min(1, Math.max(0, (v - from) / span)));
   return `rgb(${channel(0.2, 0.3)},${channel(0.5, 0.3)},${Math.max(channel(0, 0.25) - channel(0.25, 0.25), channel(0.8, 0.2))})`;
 });
-const heat = (v) => HEAT[Math.min(HEAT.length - 1, Math.floor(v * HEAT.length))];
+const HEAT32 = HEAT.map(packColor);
+const heatAt = (v) => Math.min(HEAT.length - 1, Math.floor(v * HEAT.length));
+const heat = (v) => HEAT[heatAt(v)];
 
 function average(from, to) {
   let sum = 0;
@@ -363,7 +401,8 @@ function drawWaterfall(ctx, w, h, memory) {
 }
 
 function drawSunburst(ctx, w, h, memory) {
-  clearTo(ctx, w, h);
+  const pixels = imageOf(memory, w, h);
+  pixels.fill(BLACK32);
   memory.spin = (memory.spin || 0) + 0.004 + bass() * 0.05;
   const cx = w / 2;
   const cy = h / 2;
@@ -374,28 +413,41 @@ function drawSunburst(ctx, w, h, memory) {
     const value = audio.bands[i < BANDS ? i : spokes - 1 - i];
     const angle = memory.spin + (i / spokes) * Math.PI * 2;
     const reach = inner + value * (radius - inner);
-    ctx.fillStyle = heat(0.35 + value * 0.65);
-    line(ctx, cx + Math.cos(angle) * inner, cy + Math.sin(angle) * inner, cx + Math.cos(angle) * reach, cy + Math.sin(angle) * reach);
+    const color = HEAT32[heatAt(0.35 + value * 0.65)];
+    linePx(pixels, w, h, color, cx + Math.cos(angle) * inner, cy + Math.sin(angle) * inner, cx + Math.cos(angle) * reach, cy + Math.sin(angle) * reach);
   }
+  ctx.putImageData(memory.image, 0, 0);
 }
 
 const PLASMA = Array.from({ length: 64 }, (_, i) => {
   const wave = (shift) => Math.round(127 + 127 * Math.sin((i / 64) * Math.PI * 2 + shift));
   return `rgb(${wave(0)},${wave(2.1)},${wave(4.2)})`;
 });
+const PLASMA32 = PLASMA.map(packColor);
 
 function drawPlasma(ctx, w, h, memory) {
   memory.time = (memory.time || 0) + 0.015 + audio.level * 0.09;
   const time = memory.time;
   const size = Math.max(3, Math.ceil(w / 90));
-  for (let y = 0; y < h; y += size) {
-    for (let x = 0; x < w; x += size) {
+  // One pixel per cell on a small canvas, then scaled up without smoothing.
+  const columns = Math.ceil(w / size);
+  const rows = Math.ceil(h / size);
+  const pixels = imageOf(memory, columns, rows);
+  for (let row = 0; row < rows; row++) {
+    const y = row * size;
+    for (let column = 0; column < columns; column++) {
+      const x = column * size;
       const value = Math.sin(x * 0.04 + time) + Math.sin(y * 0.06 - time * 1.3)
         + Math.sin((x + y) * 0.03 + time * 0.7) + Math.sin(Math.hypot(x - w / 2, y - h / 2) * 0.05 - time * 1.7);
-      ctx.fillStyle = PLASMA[Math.floor(((value + 4) / 8) * 63 + time * 6) % 64];
-      ctx.fillRect(x, y, size, size);
+      pixels[row * columns + column] = PLASMA32[Math.floor(((value + 4) / 8) * 63 + time * 6) % 64];
     }
   }
+  if (memory.cells?.width !== columns || memory.cells.height !== rows) {
+    memory.cells = Object.assign(document.createElement('canvas'), { width: columns, height: rows });
+  }
+  memory.cells.getContext('2d').putImageData(memory.image, 0, 0);
+  ctx.imageSmoothingEnabled = false; // resizing the canvas turns it back on
+  ctx.drawImage(memory.cells, 0, 0, columns * size, rows * size);
 }
 
 const DIRECTIONS = [[1, 0], [0, 1], [-1, 0], [0, -1]];
