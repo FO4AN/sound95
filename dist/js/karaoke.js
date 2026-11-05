@@ -10,8 +10,14 @@ import { durationMs, livePositionMs, onPlayerChange, player, seekToMs, steadyPos
 import { attachVisual, outputDelayMs } from './visualizer.js';
 import { floatWindow } from './windows.js';
 
-const STORE_KEY = 'sound95.karaoke';
+const STORE_KEY = 'sound95.karaoke'; // each track's offset, and when its lyrics were picked
+// Lyrics you chose for a track, each under a key of its own: word-timed ones run to tens
+// of kilobytes, and the list above is read and written whole on every nudge.
+const LYRICS_KEY = (urn) => `sound95.karaoke.lyrics:${urn}`;
 const SIZE_KEY = 'sound95.karaoke.size';
+// Lyrics picked in Find Lyrics can be found again, so only the tracks last sung with this
+// many are kept. Your own, pasted or tapped, are kept for good.
+const MAX_PICKS = 50;
 const NUDGE_MS = 250;
 const SIZES = { Small: 22, Medium: 33, Large: 44 };
 const REST_MS = 4000; // a gap this long gets a break screen
@@ -49,21 +55,107 @@ export function lyricsFor(track) {
 
 /** What karaoke shows for a track: lyrics you chose, pasted or tapped, or else the best found. */
 export function chosenLyricsFor(track) {
-  const mine = saved(track.urn).custom;
+  const mine = chosen(track.urn);
   // Pasted and tapped lyrics don't name a song; they're this track's.
   if (mine) return Promise.resolve({ artist: track.artist, title: track.title, ...mine });
   return lyricsFor(track).then(([best]) => best || null);
 }
 
+/* ---------- Remembering ---------- */
+
 function savedAll() {
-  try { return JSON.parse(localStorage.getItem(STORE_KEY) || '{}'); } catch { return {}; }
+  try {
+    const all = JSON.parse(localStorage.getItem(STORE_KEY) || '{}');
+    return all && typeof all === 'object' ? all : {};
+  } catch { return {}; }
 }
 const saved = (urn) => savedAll()[urn] || {};
-function save(urn, changes) {
-  const all = savedAll();
-  all[urn] = { ...all[urn], ...changes };
-  try { localStorage.setItem(STORE_KEY, JSON.stringify(all)); } catch { /* optional */ }
+const isPick = (entry) => entry?.picked > 0;
+
+const full = (e) => e?.name === 'QuotaExceededError';
+
+/**
+ * Stores what `value()` gives under `key`. When there's no room, the lyrics picked
+ * longest ago make some: they can be found again, while a full store would quietly
+ * stop keeping everything else too. `value` is asked again each time, because
+ * making room changes the list of tracks.
+ */
+function put(key, value) {
+  for (;;) {
+    try {
+      localStorage.setItem(key, value());
+      return true;
+    } catch (e) {
+      if (!full(e) || !forgetOldestPick()) return false;
+    }
+  }
 }
+
+function save(urn, changes) {
+  return put(STORE_KEY, () => {
+    const all = savedAll();
+    all[urn] = { ...all[urn], ...changes };
+    return JSON.stringify(all);
+  });
+}
+
+/** The lyrics you chose for a track, pasted, tapped or picked, or null. */
+function chosen(urn) {
+  try {
+    // Older versions kept them in the list of tracks, and any that couldn't be moved still are.
+    return JSON.parse(localStorage.getItem(LYRICS_KEY(urn))) ?? saved(urn).custom ?? null;
+  } catch { return null; }
+}
+
+/** Keeps `lyrics` for a track, with no offset: one set for other lyrics doesn't fit them. */
+function choose(urn, lyrics) {
+  const picked = lyrics.source !== 'You';
+  if (!put(LYRICS_KEY(urn), () => JSON.stringify(lyrics))) return;
+  if (!save(urn, { custom: undefined, picked: picked ? Date.now() : undefined, offset: 0 })) {
+    // Without a place in the list, nothing would ever let them go.
+    try { localStorage.removeItem(LYRICS_KEY(urn)); } catch { /* optional */ }
+    return;
+  }
+  let extra = Object.values(savedAll()).filter(isPick).length - MAX_PICKS;
+  while (extra-- > 0 && forgetOldestPick()) { /* oldest first */ }
+}
+
+function forget(urn) {
+  try { localStorage.removeItem(LYRICS_KEY(urn)); } catch { /* optional */ }
+  save(urn, { custom: undefined, picked: undefined, offset: 0 });
+}
+
+/** Forgets the lyrics picked longest ago, and the offset set for them. False if none are kept. */
+function forgetOldestPick() {
+  const all = savedAll();
+  const [oldest] = Object.keys(all).filter((urn) => isPick(all[urn])).sort((a, b) => all[a].picked - all[b].picked);
+  if (!oldest) return false;
+  delete all[oldest];
+  try {
+    localStorage.removeItem(LYRICS_KEY(oldest));
+    localStorage.setItem(STORE_KEY, JSON.stringify(all));
+    return true;
+  } catch { return false; }
+}
+
+/** Up to 0.6.0, your lyrics sat in the list of tracks itself. */
+function moveLyricsOut() {
+  const all = savedAll();
+  let moved = false;
+  for (const [urn, entry] of Object.entries(all)) {
+    if (!entry || typeof entry !== 'object' || !('custom' in entry)) continue;
+    const { custom, ...rest } = entry;
+    if (custom) {
+      try { localStorage.setItem(LYRICS_KEY(urn), JSON.stringify(custom)); } catch { continue; }
+      if (custom.source !== 'You') rest.picked = 1;
+    }
+    all[urn] = rest;
+    moved = true;
+  }
+  if (!moved) return;
+  try { localStorage.setItem(STORE_KEY, JSON.stringify(all)); } catch { /* they're moved again next time */ }
+}
+moveLyricsOut();
 
 /* ---------- Timing ---------- */
 
@@ -294,8 +386,11 @@ async function load(track, retried = false) {
   if (!track) { showNotice(tr('Play a track to sing along.')); return; }
   const remembered = saved(track.urn);
   state.offset = remembered.offset || 0;
-  if (remembered.custom) {
-    use(remembered.custom);
+  const mine = chosen(track.urn);
+  if (mine) {
+    // Picks sung with lately are the last to go.
+    if (isPick(remembered)) save(track.urn, { picked: Date.now() });
+    use(mine);
     prefetchNext();
     return;
   }
@@ -430,7 +525,7 @@ function tap(e) {
   session.index += 1;
   if (session.index < session.lines.length) { showTapLine(); return; }
   const custom = { source: 'You', custom: true, synced: true, byWord: false, offBy: 0, lines: session.lines.map((l) => ({ ...l, dur: 0, words: [] })) };
-  save(state.track.urn, { custom, offset: 0 });
+  choose(state.track.urn, custom);
   state.offset = 0;
   stopTapping();
   use(custom);
@@ -514,7 +609,7 @@ async function findDialog() {
  * for other lyrics doesn't fit them. The track may have changed while you chose.
  */
 function keep(track, lyrics) {
-  save(track.urn, { custom: lyrics, offset: 0 });
+  choose(track.urn, lyrics);
   if (state.track?.urn !== track.urn) return;
   state.token += 1; // a search still running for this track mustn't replace them
   state.offset = 0;
@@ -545,8 +640,8 @@ const lyricsMenu = () => [
   { label: tr('Tap to Sync'), disabled: !state.lyrics || !player.current, action: startTapping },
   {
     label: tr('Forget My Lyrics'),
-    disabled: !state.track || !saved(state.track.urn).custom,
-    action: () => { save(state.track.urn, { custom: null, offset: 0 }); load(state.track); },
+    disabled: !state.track || !chosen(state.track.urn),
+    action: () => { forget(state.track.urn); load(state.track); },
   },
 ];
 
