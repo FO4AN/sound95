@@ -467,7 +467,7 @@
     $('.settings .options input').click();
     pick($('.settings select'), 'light');
     await clickText('.dialog button', 'OK');
-    await check(() => skin() === 'classic' && localStorage.getItem('sound95.motion') === '1' && localStorage.getItem('sound95.motionSpeed') === 'fast', 'the animation choices are kept');
+    await check(() => skin() === 'classic' && localStorage.getItem('sound95.motionChoice') === '1' && localStorage.getItem('sound95.motionSpeed') === 'fast', 'the animation choices are kept');
 
     // A background of your own: a GIF that plays along with the music.
     const TEST_GIF = 'R0lGODlhCAAGAPAAAP8AAAAAACH/C05FVFNDQVBFMi4wAwEAAAAh+QQACgAAACwAAAAACAAGAAACBoSPqct9BQAh+QQACgAAACwAAAAACAAGAIAAAP8AAAACBoSPqct9BQA7';

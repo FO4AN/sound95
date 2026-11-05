@@ -2,8 +2,14 @@
 // none, so Classic stays instant. The CSS is in modern.css, under data-motion="on";
 // this decides when that's set and lets things animate on their way out.
 
-const KEY = 'sound95.motion';
+// Saved only when animations are turned on or off in Settings.
+const KEY = 'sound95.motionChoice';
+// 0.6.0 saved this on every start, as if it had been chosen, so it says nothing
+// about what anyone wants and would keep the system's reduced motion setting out.
+const OLD_KEY = 'sound95.motion';
 const SPEED_KEY = 'sound95.motionSpeed';
+
+try { localStorage.removeItem(OLD_KEY); } catch { /* optional */ }
 
 export const SPEEDS = { slow: 1.6, normal: 1, fast: 0.6 };
 
