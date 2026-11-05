@@ -26,11 +26,17 @@ export function motionSpeed() {
 /** True while things on screen animate. */
 export const animating = () => document.documentElement.dataset.motion === 'on';
 
-export function applyMotion({ on = motionOn(), speed = motionSpeed() } = {}) {
+/**
+ * Sets up animations, and saves `on` and `speed` when they're given. Until you choose,
+ * the system's reduced motion setting decides, each time Sound95 starts.
+ */
+export function applyMotion({ on, speed } = {}) {
   try {
-    localStorage.setItem(KEY, on ? '1' : '0');
-    localStorage.setItem(SPEED_KEY, speed);
+    if (on != null) localStorage.setItem(KEY, on ? '1' : '0');
+    if (speed != null) localStorage.setItem(SPEED_KEY, speed);
   } catch { /* optional */ }
+  on ??= motionOn();
+  speed ??= motionSpeed();
   const root = document.documentElement;
   const animates = on && root.dataset.skin === 'modern';
   root.dataset.motion = animates ? 'on' : 'off';

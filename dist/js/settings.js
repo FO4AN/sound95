@@ -157,7 +157,8 @@ export async function settingsDialog() {
         el('button', { class: 'default', onClick: async () => {
             if (saving) return;
             saving = true;
-            applyMotion({ on: motion.checked, speed: speed.value });
+            // Saved once changed: until then the system's reduced motion setting decides.
+            applyMotion({ on: motion.checked !== motionOn() ? motion.checked : undefined, speed: speed.value });
             crossfade(() => applyTheme(theme));
             setFollowsVolume(follow.checked);
             applyCloseToTray(tray.checked);
