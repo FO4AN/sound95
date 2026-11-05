@@ -5,6 +5,9 @@ import { tr } from './i18n.js';
 import { setStatus } from './dom.js';
 
 const STORE_KEY = 'sound95.player';
+const MAX_SAVED = 500; // tracks of the queue kept for next time
+const SAVED_BEHIND = 50; // of those, how many from before the current track
+const VOLUME_SAVE_MS = 500;
 const MAX_SKIPS = 3;
 const START_TIMEOUT_MS = 15000;
 const PROGRESS_EVERY_MS = 200; // the Widget reports far more often than the bar can show
@@ -45,10 +48,12 @@ let skips = 0;
 let startTimer = null;
 
 function persist() {
+  // A long queue keeps the part around the current track, so that's the one restored.
+  const from = Math.max(0, Math.min(player.index - SAVED_BEHIND, player.queue.length - MAX_SAVED));
   try {
     localStorage.setItem(STORE_KEY, JSON.stringify({
-      queue: player.queue.slice(0, 500),
-      index: player.index,
+      queue: player.queue.slice(from, from + MAX_SAVED),
+      index: player.index - from,
       shuffle: player.shuffle,
       repeat: player.repeat,
       volume,
@@ -511,9 +516,12 @@ export function seekToMs(ms) {
 export const durationMs = () => duration || player.current?.duration || 0;
 export const positionMs = () => position;
 
+// Dragging the slider sets the volume many times a second, and saving writes the queue too.
+let volumeSave = null;
 export function setVolume(v) {
   volume = Math.min(1, Math.max(0, v));
   widget?.setVolume(Math.round(volume * 100));
-  persist();
+  clearTimeout(volumeSave);
+  volumeSave = setTimeout(persist, VOLUME_SAVE_MS);
 }
 export const getVolume = () => volume;
