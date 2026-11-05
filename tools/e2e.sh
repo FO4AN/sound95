@@ -6,6 +6,19 @@ set -u
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 OUT=${OUT:-$(mktemp -d)}
 mkdir -p "$OUT"; rm -rf "$OUT/cfg" "$OUT/data"; rm -f "$OUT"/*.png
+touch "$OUT/started"
+# The app's settings folder: XDG_CONFIG_HOME on Linux, %APPDATA% on Windows.
+config=("$OUT/cfg/com.fo4an.sound95")
+[ -n "${APPDATA:-}" ] && config+=("$(cygpath -u "$APPDATA" 2>/dev/null || printf '%s' "$APPDATA")/com.fo4an.sound95")
+# A 403's reason, written during this run.
+refusal_kept() {
+  local dir
+  for dir in "${config[@]}"; do
+    [ "$dir/last-refusal.txt" -nt "$OUT/started" ] && grep -qs 'mock refusal' "$dir/last-refusal.txt" && return 0
+  done
+  return 1
+}
+failed=0
 node "$ROOT/tools/mock-soundcloud.mjs" > "$OUT/mock.log" 2>&1 &
 MOCK=$!
 trap 'kill $MOCK ${APP:-} 2>/dev/null' EXIT
@@ -30,8 +43,18 @@ for _ in $(seq 1 1800); do
     msg=${line#E2E }
     case $msg in
       SHOT\ *) shot "${msg#SHOT }" ;;
-      REFUSAL) grep -qs 'mock refusal' "$OUT"/cfg/*/last-refusal.txt && echo 'PASS the reason for a refusal is kept' ;;
-      RESULT*) echo "$msg"; curl -s "$BASE/__log" > "$OUT/api.json"; exit 0 ;;
+      REFUSAL)
+        if refusal_kept; then
+          echo 'PASS the reason for a refusal is kept'
+        else
+          echo 'FAIL the reason for a refusal is kept'
+          failed=$((failed + 1))
+        fi ;;
+      RESULT*)
+        # The app's count, plus this script's own checks.
+        count=${msg#RESULT failures=}
+        echo "RESULT failures=$((${count//[!0-9]/} + failed))"
+        curl -s "$BASE/__log" > "$OUT/api.json"; exit 0 ;;
       *) echo "$msg" ;;
     esac
   done
