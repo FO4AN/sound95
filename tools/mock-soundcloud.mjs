@@ -203,7 +203,8 @@ const server = createServer(async (req, res) => {
     });
   }
   if (path === '/update.bin') { res.writeHead(200, { 'content-length': 4 }); return res.end('fake'); }
-  if (path === '/__report') { console.log('E2E', url.searchParams.get('m')); return json(res, 200, {}); }
+  // One line each, since tools/e2e.sh reads them line by line.
+  if (path === '/__report') { console.log('E2E', String(url.searchParams.get('m')).replace(/\s*\n\s*/g, ' / ')); return json(res, 200, {}); }
   if (path === '/__expire') { access.clear(); return json(res, 200, { ok: true }); }
   if (path === '/__revoke') { access.clear(); refresh.clear(); return json(res, 200, { ok: true }); }
   if (path === '/__signin') return json(res, 200, signIn);
